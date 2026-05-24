@@ -33,22 +33,6 @@ export default function SpectrumBar({ activeIndex, onSelect }: Props) {
         />
       </div>
 
-      <div className="flex gap-2 overflow-x-auto pb-1" style={{ scrollbarWidth: 'none' }}>
-        {HUE_RANGES.map((range, i) => (
-          <button
-            key={range.label}
-            onClick={() => onSelect(i)}
-            className="flex-shrink-0 px-3 py-[3px] rounded-full text-[9px] tracking-[0.15em] uppercase transition-all duration-200 border"
-            style={{
-              borderColor: i === activeIndex ? range.display : '#1e1e1e',
-              background: i === activeIndex ? range.display + '22' : 'transparent',
-              color: i === activeIndex ? '#e2d9c8' : '#444',
-            }}
-          >
-            {range.label}
-          </button>
-        ))}
-      </div>
     </div>
   );
 }
