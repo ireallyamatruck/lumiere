@@ -205,8 +205,21 @@ export default function Home() {
       {/* Header */}
       <header className="flex items-center justify-between px-8 pt-8 pb-0">
         <div className="flex items-baseline gap-5">
-          <h1 className="font-display font-light tracking-[0.1em] text-[#e2d9c8]"
-            style={{ fontFamily: 'var(--font-display)', fontSize: '38px' }}>
+          <h1
+            className="font-display font-light tracking-[0.1em] text-[#e2d9c8] cursor-pointer"
+            style={{ fontFamily: 'var(--font-display)', fontSize: '38px' }}
+            onClick={() => {
+              setFilmsRevealed(false);
+              setFilterActive(false);
+              setCosmosHue(null);
+              setDisplayed(allMovies);
+              setSelectedGenres(new Set());
+              setRatingMin(0); setRatingMax(10);
+              setYearMin(1950); setYearMax(2025);
+              setSearchQuery('');
+              setShowSearch(false);
+            }}
+          >
             lumi<span className="italic text-neutral-500">ère</span>
           </h1>
           <span className="text-[11px] tracking-[0.25em] text-neutral-700 uppercase hidden sm:block">cinema by colour</span>
@@ -215,18 +228,47 @@ export default function Home() {
         <div className="flex items-center gap-5">
           {user ? (
             <div className="flex items-center gap-4">
-              <a href="/profile" className="text-[11px] tracking-[0.15em] text-neutral-500 hover:text-[#e2d9c8] transition-colors">
-                {profile?.username}
+              <a
+                href="/profile"
+                className="flex items-center gap-2 transition-colors group"
+                style={{ textDecoration: 'none' }}
+              >
+                <div style={{
+                  width: '28px', height: '28px', borderRadius: '50%',
+                  background: '#1a1a1a', border: '1px solid #2a2a2a',
+                  display: 'flex', alignItems: 'center', justifyContent: 'center',
+                  fontSize: '12px', color: '#888', fontFamily: 'var(--font-display)',
+                  transition: 'border-color 0.2s',
+                }}
+                onMouseEnter={e => (e.currentTarget.style.borderColor = '#666')}
+                onMouseLeave={e => (e.currentTarget.style.borderColor = '#2a2a2a')}
+                >
+                  {profile?.username?.[0]?.toUpperCase()}
+                </div>
+                <span style={{ fontSize: '12px', color: '#888', letterSpacing: '0.08em', transition: 'color 0.2s' }}
+                  onMouseEnter={e => (e.currentTarget.style.color = '#e2d9c8')}
+                  onMouseLeave={e => (e.currentTarget.style.color = '#888')}
+                >
+                  {profile?.username}
+                </span>
               </a>
-              <button onClick={signOut} className="text-[10px] tracking-[0.2em] uppercase text-neutral-700 hover:text-neutral-500 transition-colors">logout</button>
+              <button onClick={signOut}
+                style={{ fontSize: '11px', letterSpacing: '0.15em', textTransform: 'uppercase', color: '#444', background: 'none', border: 'none', cursor: 'pointer', transition: 'color 0.2s' }}
+                onMouseEnter={e => (e.currentTarget.style.color = '#888')}
+                onMouseLeave={e => (e.currentTarget.style.color = '#444')}
+              >logout</button>
             </div>
           ) : (
-            <button onClick={() => setShowAuth(true)} className="text-[11px] tracking-[0.2em] uppercase text-neutral-600 hover:text-[#e2d9c8] transition-colors">
+            <button onClick={() => setShowAuth(true)}
+              style={{ fontSize: '12px', letterSpacing: '0.15em', textTransform: 'uppercase', color: '#888', background: 'none', border: '1px solid #2a2a2a', borderRadius: '3px', padding: '5px 12px', cursor: 'pointer', transition: 'all 0.2s' }}
+              onMouseEnter={e => { e.currentTarget.style.color = '#e2d9c8'; e.currentTarget.style.borderColor = '#666'; }}
+              onMouseLeave={e => { e.currentTarget.style.color = '#888'; e.currentTarget.style.borderColor = '#2a2a2a'; }}
+            >
               sign in
             </button>
           )}
           {filterActive && (
-            <button onClick={() => { setDisplayed(applyFilters(allMovies)); setFilterActive(false); setCosmosHue(null); }}
+            <button onClick={() => { setDisplayed(allMovies); setFilterActive(false); setCosmosHue(null); setFilmsRevealed(false); }}
               className="text-[11px] tracking-[0.2em] uppercase text-neutral-700 hover:text-[#e2d9c8] transition-colors">clear</button>
           )}
           <button onClick={() => setShowSearch(s => !s)}
@@ -393,14 +435,7 @@ export default function Home() {
               ))}
             </div>
           ) : !filmsRevealed ? (
-            <div className="flex flex-col items-center justify-center py-32 text-center">
-              <div style={{ fontFamily: 'var(--font-display)', fontSize: '28px', fontWeight: 300, color: '#333', marginBottom: '12px', fontStyle: 'italic' }}>
-                pick a colour to begin
-              </div>
-              <div style={{ fontSize: '11px', color: '#2a2a2a', letterSpacing: '0.25em', textTransform: 'uppercase' }}>
-                or apply a filter below
-              </div>
-            </div>
+            <EmptyPrompt />
           ) : displayed.length === 0 ? (
             <div className="flex flex-col items-center justify-center py-24">
               <div style={{ fontSize: '12px', color: '#444', letterSpacing: '0.3em', textTransform: 'uppercase' }}>no results found</div>
@@ -418,5 +453,34 @@ export default function Home() {
       <MovieModal movie={selected} genres={genres} onClose={() => setSelected(null)} onAuthRequired={() => setShowAuth(true)} />
       {showAuth && <AuthModal onClose={() => setShowAuth(false)} />}
     </main>
+  );
+}
+
+const PROMPTS = [
+  { line1: 'every film has a colour.', line2: 'what are you drawn to tonight?' },
+  { line1: 'cinema is painted light.', line2: 'find yours.' },
+  { line1: 'mood is colour.', line2: 'pick the one that fits.' },
+  { line1: 'the right film is out there.', line2: 'let colour lead you to it.' },
+  { line1: 'some nights call for deep blue.', line2: 'others for burning amber.' },
+  { line1: 'you already know what you want to feel.', line2: 'the colour knows the film.' },
+  { line1: 'the spectrum is wide.', line2: 'your evening is waiting.' },
+  { line1: 'art director, cinematographer, director —', line2: 'they all chose a colour. so do you.' },
+];
+
+function EmptyPrompt() {
+  const [idx] = useState(() => Math.floor(Math.random() * PROMPTS.length));
+  const prompt = PROMPTS[idx];
+  return (
+    <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', padding: '80px 20px', textAlign: 'center' }}>
+      <div style={{ fontFamily: 'var(--font-display)', fontSize: '32px', fontWeight: 300, color: '#2e2e2e', fontStyle: 'italic', lineHeight: 1.3, marginBottom: '12px', maxWidth: '480px' }}>
+        {prompt.line1}
+      </div>
+      <div style={{ fontFamily: 'var(--font-display)', fontSize: '20px', fontWeight: 300, color: '#252525', fontStyle: 'italic', lineHeight: 1.4, maxWidth: '400px' }}>
+        {prompt.line2}
+      </div>
+      <div style={{ marginTop: '40px', fontSize: '10px', color: '#1e1e1e', letterSpacing: '0.3em', textTransform: 'uppercase' }}>
+        drag the colour picker · apply a filter · or search
+      </div>
+    </div>
   );
 }
