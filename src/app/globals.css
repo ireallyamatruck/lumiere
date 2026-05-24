@@ -1,0 +1,132 @@
+@import url('https://fonts.googleapis.com/css2?family=Cormorant+Garamond:ital,wght@0,300;0,400;0,500;1,300;1,400&family=DM+Mono:wght@300;400&display=swap');
+
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+:root {
+  --font-display: 'Cormorant Garamond', serif;
+  --font-mono: 'DM Mono', monospace;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+html {
+  background: #070707;
+  color: #e2d9c8;
+}
+
+body {
+  background: #070707;
+  color: #e2d9c8;
+  font-family: var(--font-mono);
+  min-height: 100vh;
+  -webkit-font-smoothing: antialiased;
+}
+
+::selection {
+  background: rgba(226, 217, 200, 0.15);
+}
+
+::-webkit-scrollbar {
+  width: 4px;
+  height: 4px;
+}
+
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+::-webkit-scrollbar-thumb {
+  background: #2a2a2a;
+  border-radius: 2px;
+}
+
+.font-display {
+  font-family: var(--font-display);
+}
+
+.spectrum-gradient {
+  background: linear-gradient(to right,
+    hsl(0,65%,40%), hsl(22,70%,42%), hsl(45,75%,44%),
+    hsl(58,70%,42%), hsl(95,55%,34%), hsl(135,50%,30%),
+    hsl(168,55%,30%), hsl(205,65%,38%), hsl(230,60%,38%),
+    hsl(258,60%,38%), hsl(285,60%,36%), hsl(325,65%,38%), hsl(360,65%,40%)
+  );
+}
+
+@keyframes fadeUp {
+  from { opacity: 0; transform: translateY(12px); }
+  to   { opacity: 1; transform: translateY(0); }
+}
+
+@keyframes shimmer {
+  0%   { background-position: -400px 0; }
+  100% { background-position: 400px 0; }
+}
+
+.animate-fade-up {
+  animation: fadeUp 0.4s ease forwards;
+}
+
+.skeleton {
+  background: linear-gradient(90deg, #111 25%, #1a1a1a 50%, #111 75%);
+  background-size: 400px 100%;
+  animation: shimmer 1.4s infinite;
+}
+
+.poster-card {
+  position: relative;
+  overflow: hidden;
+  border-radius: 3px;
+  cursor: pointer;
+  aspect-ratio: 2/3;
+  background: #111;
+}
+
+.poster-card img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  display: block;
+  transition: transform 0.5s cubic-bezier(0.25, 0.46, 0.45, 0.94),
+              filter 0.3s ease;
+}
+
+.poster-card:hover img {
+  transform: scale(1.05);
+  filter: brightness(0.5);
+}
+
+.poster-overlay {
+  position: absolute;
+  inset: 0;
+  background: linear-gradient(to top, rgba(0,0,0,0.92) 0%, transparent 50%);
+  opacity: 0;
+  transition: opacity 0.3s ease;
+  display: flex;
+  flex-direction: column;
+  justify-content: flex-end;
+  padding: 14px 10px 10px;
+}
+
+.poster-card:hover .poster-overlay {
+  opacity: 1;
+}
+
+.color-pip {
+  position: absolute;
+  top: 8px;
+  right: 8px;
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  border: 1px solid rgba(255,255,255,0.25);
+  transition: transform 0.2s;
+}
+
+.poster-card:hover .color-pip {
+  transform: scale(1.3);
+}
