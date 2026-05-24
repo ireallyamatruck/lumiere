@@ -261,7 +261,7 @@ export default function ProfilePage() {
                 padding: '14px 18px', fontSize: '12px', letterSpacing: '0.1em',
                 color: tab === t.id ? '#f0ebe0' : '#555',
                 borderBottom: tab === t.id ? '2px solid #f0ebe0' : '2px solid transparent',
-                background: 'none', border: 'none', borderBottom: tab === t.id ? '2px solid #f0ebe0' : '2px solid transparent',
+                background: 'none', border: 'none',
                 cursor: 'pointer', whiteSpace: 'nowrap', transition: 'color 0.2s',
               }}
               onMouseEnter={e => { if (tab !== t.id) e.currentTarget.style.color = '#aaa'; }}
