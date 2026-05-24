@@ -48,6 +48,7 @@ export default function Home() {
   const [viewMode, setViewMode] = useState<ViewMode>('grid');
   const [colorMode, setColorMode] = useState<ColorMode>('poster');
   const [filterActive, setFilterActive] = useState(false);
+  const [filmsRevealed, setFilmsRevealed] = useState(false);
   const [cosmosHue, setCosmosHue] = useState<number | null>(null);
   const [showAuth, setShowAuth] = useState(false);
   const [pickerHue, setPickerHue] = useState(210);
@@ -171,6 +172,7 @@ export default function Home() {
       });
     setDisplayed(applyFilters(base.length > 0 ? base : allMovies));
     setFilterActive(true);
+    setFilmsRevealed(true);
     setCosmosHue(h);
   }, [allMovies, colorMode, applyFilters]);
 
@@ -216,7 +218,7 @@ export default function Home() {
               <a href="/profile" className="text-[11px] tracking-[0.15em] text-neutral-500 hover:text-[#e2d9c8] transition-colors">
                 {profile?.username}
               </a>
-              <button onClick={signOut} className="text-[10px] tracking-[0.2em] uppercase text-neutral-700 hover:text-neutral-500 transition-colors">out</button>
+              <button onClick={signOut} className="text-[10px] tracking-[0.2em] uppercase text-neutral-700 hover:text-neutral-500 transition-colors">logout</button>
             </div>
           ) : (
             <button onClick={() => setShowAuth(true)} className="text-[11px] tracking-[0.2em] uppercase text-neutral-600 hover:text-[#e2d9c8] transition-colors">
@@ -260,7 +262,7 @@ export default function Home() {
               <button key={m} onClick={() => setColorMode(m)}
                 className="text-[10px] tracking-[0.15em] uppercase px-3 py-[5px] transition-all duration-200"
                 style={{ background: colorMode === m ? '#1a1a1a' : 'transparent', color: colorMode === m ? '#e2d9c8' : '#444' }}>
-                {m === 'poster' ? 'poster art' : 'film scene'}
+                {m === 'poster' ? 'cover art' : 'aura'}
               </button>
             ))}
           </div>
@@ -345,7 +347,7 @@ export default function Home() {
             {/* Apply + Reset */}
             <div className="flex items-center gap-4">
               <button
-                onClick={() => { setDisplayed(applyFilters(allMovies)); setShowFilters(false); }}
+                onClick={() => { setDisplayed(applyFilters(allMovies)); setShowFilters(false); setFilmsRevealed(true); }}
                 style={{ fontSize: '11px', letterSpacing: '0.2em', textTransform: 'uppercase', border: '1px solid #aaa', color: '#f0ebe0', padding: '7px 20px', borderRadius: '3px', background: 'transparent', cursor: 'pointer', transition: 'all 0.2s' }}
                 onMouseEnter={e => (e.currentTarget.style.background = '#1a1a1a')}
                 onMouseLeave={e => (e.currentTarget.style.background = 'transparent')}
@@ -390,9 +392,18 @@ export default function Home() {
                 <div key={i} className="skeleton rounded-sm" style={{ aspectRatio: '2/3', animationDelay: `${i * 40}ms` }} />
               ))}
             </div>
+          ) : !filmsRevealed ? (
+            <div className="flex flex-col items-center justify-center py-32 text-center">
+              <div style={{ fontFamily: 'var(--font-display)', fontSize: '28px', fontWeight: 300, color: '#333', marginBottom: '12px', fontStyle: 'italic' }}>
+                pick a colour to begin
+              </div>
+              <div style={{ fontSize: '11px', color: '#2a2a2a', letterSpacing: '0.25em', textTransform: 'uppercase' }}>
+                or apply a filter below
+              </div>
+            </div>
           ) : displayed.length === 0 ? (
             <div className="flex flex-col items-center justify-center py-24">
-              <div className="text-[12px] tracking-[0.3em] text-neutral-700 uppercase">no results found</div>
+              <div style={{ fontSize: '12px', color: '#444', letterSpacing: '0.3em', textTransform: 'uppercase' }}>no results found</div>
             </div>
           ) : (
             <div className="grid grid-cols-3 sm:grid-cols-4 md:grid-cols-5 lg:grid-cols-6 xl:grid-cols-7 gap-3">

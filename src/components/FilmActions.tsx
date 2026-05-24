@@ -13,22 +13,30 @@ interface Props {
 function StarRating({ value, onChange }: { value: number; onChange: (v: number) => void }) {
   const [hover, setHover] = useState(0);
   return (
-    <div className="flex gap-1">
-      {[1, 2, 3, 4, 5].map(star => (
-        <button
-          key={star}
-          onMouseEnter={() => setHover(star)}
-          onMouseLeave={() => setHover(0)}
-          onClick={() => onChange(star === value ? 0 : star)}
-          className="text-[22px] transition-colors"
-          style={{ color: star <= (hover || value) ? '#e2d9c8' : '#2a2a2a' }}
-        >
-          ★
-        </button>
-      ))}
+    <div>
+      <div style={{ fontSize: '11px', color: hover || value ? '#ccc' : '#444', letterSpacing: '0.2em', textTransform: 'uppercase', marginBottom: '8px', textAlign: 'center', transition: 'color 0.2s' }}>
+        rate
+      </div>
+      <div className="flex gap-1 justify-center">
+        {[1, 2, 3, 4, 5].map(star => (
+          <button
+            key={star}
+            onMouseEnter={() => setHover(star)}
+            onMouseLeave={() => setHover(0)}
+            onClick={() => onChange(star === value ? 0 : star)}
+            style={{ fontSize: '24px', color: star <= (hover || value) ? '#f0ebe0' : '#252525', background: 'none', border: 'none', cursor: 'pointer', transition: 'color 0.15s', padding: '0 2px' }}
+          >
+            ★
+          </button>
+        ))}
+      </div>
     </div>
   );
 }
+
+const ACTION_ICONS: Record<string, string> = {
+  watched: '◎', like: '♥', watchlist: '⊕', review: '✎'
+};
 
 export default function FilmActions({ movie, onAuthRequired }: Props) {
   const { user } = useAuth();
@@ -47,6 +55,7 @@ export default function FilmActions({ movie, onAuthRequired }: Props) {
   const [spoiler, setSpoiler] = useState(false);
   const [submitting, setSubmitting] = useState(false);
   const [newListName, setNewListName] = useState('');
+  const [hoveredAction, setHoveredAction] = useState<string | null>(null);
 
   useEffect(() => {
     if (!user) return;
@@ -61,52 +70,32 @@ export default function FilmActions({ movie, onAuthRequired }: Props) {
       setLiked(!!l.data);
       setRating(r.data?.rating ?? 0);
       setWatchlists(wl.data || []);
-
-      // Check which watchlists contain this film
       if (wl.data?.length) {
         const ids = wl.data.map((w: Watchlist) => w.id);
-        const { data: items } = await supabase
-          .from('watchlist_items')
-          .select('watchlist_id')
-          .in('watchlist_id', ids)
-          .eq('tmdb_id', tmdbId);
-        setInWatchlists(new Set((items || []).map((i: { watchlist_id: string }) => i.watchlist_id)));
+        const { data: items } = await supabase.from('watchlist_items').select('watchlist_id').in('watchlist_id', ids).eq('tmdb_id', tmdbId);
+        setInWatchlists(new Set((items || []).map((i: any) => i.watchlist_id)));
       }
     };
     load();
   }, [user, tmdbId]);
 
-  const guard = (fn: () => void) => {
-    if (!user) { onAuthRequired(); return; }
-    fn();
-  };
+  const guard = (fn: () => void) => { if (!user) { onAuthRequired(); return; } fn(); };
 
   const toggleWatched = () => guard(async () => {
-    if (watched) {
-      await supabase.from('watched').delete().eq('user_id', user!.id).eq('tmdb_id', tmdbId);
-    } else {
-      await supabase.from('watched').insert({ user_id: user!.id, tmdb_id: tmdbId, media_type: mediaType });
-    }
+    if (watched) await supabase.from('watched').delete().eq('user_id', user!.id).eq('tmdb_id', tmdbId);
+    else await supabase.from('watched').insert({ user_id: user!.id, tmdb_id: tmdbId, media_type: mediaType });
     setWatched(!watched);
   });
 
   const toggleLike = () => guard(async () => {
-    if (liked) {
-      await supabase.from('likes').delete().eq('user_id', user!.id).eq('tmdb_id', tmdbId);
-    } else {
-      await supabase.from('likes').insert({ user_id: user!.id, tmdb_id: tmdbId, media_type: mediaType });
-    }
+    if (liked) await supabase.from('likes').delete().eq('user_id', user!.id).eq('tmdb_id', tmdbId);
+    else await supabase.from('likes').insert({ user_id: user!.id, tmdb_id: tmdbId, media_type: mediaType });
     setLiked(!liked);
   });
 
   const handleRating = (val: number) => guard(async () => {
-    if (val === 0) {
-      await supabase.from('ratings').delete().eq('user_id', user!.id).eq('tmdb_id', tmdbId);
-    } else {
-      await supabase.from('ratings').upsert({
-        user_id: user!.id, tmdb_id: tmdbId, media_type: mediaType, rating: val, updated_at: new Date().toISOString()
-      }, { onConflict: 'user_id,tmdb_id' });
-    }
+    if (val === 0) await supabase.from('ratings').delete().eq('user_id', user!.id).eq('tmdb_id', tmdbId);
+    else await supabase.from('ratings').upsert({ user_id: user!.id, tmdb_id: tmdbId, media_type: mediaType, rating: val, updated_at: new Date().toISOString() }, { onConflict: 'user_id,tmdb_id' });
     setRating(val);
   });
 
@@ -135,81 +124,69 @@ export default function FilmActions({ movie, onAuthRequired }: Props) {
 
   const createList = async () => {
     if (!newListName.trim() || !user) return;
-    const { data } = await supabase.from('watchlists').insert({
-      user_id: user.id, name: newListName.trim(), is_public: true
-    }).select().single();
-    if (data) {
-      setWatchlists(prev => [...prev, data]);
-      setNewListName('');
-    }
+    const { data } = await supabase.from('watchlists').insert({ user_id: user.id, name: newListName.trim(), is_public: true }).select().single();
+    if (data) { setWatchlists(prev => [...prev, data]); setNewListName(''); }
   };
 
-  const iconStyle = (active: boolean) => ({
-    color: active ? '#e2d9c8' : '#444',
-    transition: 'color 0.2s',
-  });
+  const actions = [
+    { key: 'watched', label: 'watched', active: watched, onClick: toggleWatched },
+    { key: 'like', label: 'like', active: liked, onClick: toggleLike },
+    { key: 'watchlist', label: 'watchlist', active: showLists, onClick: () => guard(() => setShowLists(!showLists)) },
+    { key: 'review', label: 'review', active: showReview, onClick: () => guard(() => setShowReview(!showReview)) },
+  ];
 
   return (
-    <div className="border-t border-[#1a1a1a] mt-4">
-      {/* Main actions row */}
-      <div className="flex items-center justify-around py-4">
-        {[
-          { label: 'watched', icon: '◎', active: watched, onClick: toggleWatched },
-          { label: 'like', icon: '♥', active: liked, onClick: toggleLike },
-          { label: 'watchlist', icon: '⊕', active: false, onClick: () => guard(() => setShowLists(!showLists)) },
-          { label: 'review', icon: '✎', active: showReview, onClick: () => guard(() => setShowReview(!showReview)) },
-        ].map(({ label, icon, active, onClick }) => (
-          <button
-            key={label}
-            onClick={onClick}
-            className="flex flex-col items-center gap-1 group"
-          >
-            <span className="text-[18px] transition-all duration-200 group-hover:scale-110" style={iconStyle(active)}>
-              {icon}
-            </span>
-            <span className="text-[8px] tracking-[0.15em] uppercase" style={{ color: active ? '#888' : '#333' }}>
-              {label}
-            </span>
-          </button>
-        ))}
+    <div style={{ borderTop: '1px solid #1a1a1a', marginTop: '4px' }}>
+      {/* Main action row */}
+      <div style={{ display: 'flex', justifyContent: 'space-around', padding: '16px 8px 12px' }}>
+        {actions.map(({ key, label, active, onClick }) => {
+          const isHovered = hoveredAction === key;
+          const isActive = active;
+          return (
+            <button key={key} onClick={onClick}
+              onMouseEnter={() => setHoveredAction(key)}
+              onMouseLeave={() => setHoveredAction(null)}
+              style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '5px', background: 'none', border: 'none', cursor: 'pointer', padding: '4px 8px' }}>
+              <span style={{ fontSize: '20px', color: isActive ? '#f0ebe0' : isHovered ? '#ccc' : '#333', transition: 'color 0.2s, transform 0.2s', transform: isHovered ? 'scale(1.15)' : 'scale(1)', display: 'block' }}>
+                {ACTION_ICONS[key]}
+              </span>
+              <span style={{ fontSize: '9px', letterSpacing: '0.15em', textTransform: 'uppercase', color: isActive ? '#aaa' : isHovered ? '#888' : '#2a2a2a', transition: 'color 0.2s' }}>
+                {label}
+              </span>
+            </button>
+          );
+        })}
       </div>
 
       {/* Star rating */}
-      <div className="px-4 pb-3 flex flex-col items-center gap-1">
-        <div className="text-[9px] tracking-[0.2em] uppercase text-neutral-700 mb-1">rate</div>
+      <div style={{ paddingBottom: '14px' }}>
         <StarRating value={rating} onChange={handleRating} />
       </div>
 
       {/* Watchlists panel */}
       {showLists && (
-        <div className="px-4 pb-4 border-t border-[#1a1a1a] pt-3">
-          <div className="text-[9px] tracking-[0.2em] uppercase text-neutral-600 mb-3">add to list</div>
-          {watchlists.length === 0 && (
-            <div className="text-[10px] text-neutral-700 mb-3">no lists yet</div>
-          )}
+        <div style={{ padding: '12px 16px 16px', borderTop: '1px solid #1a1a1a' }}>
+          <div style={{ fontSize: '10px', letterSpacing: '0.2em', textTransform: 'uppercase', color: '#666', marginBottom: '10px' }}>add to list</div>
+          {watchlists.length === 0 && <div style={{ fontSize: '11px', color: '#444', marginBottom: '10px' }}>no lists yet</div>}
           {watchlists.map(wl => (
-            <button
-              key={wl.id}
-              onClick={() => toggleWatchlist(wl.id)}
-              className="flex items-center gap-2 w-full py-1 text-left"
-            >
-              <span className="text-[14px]" style={{ color: inWatchlists.has(wl.id) ? '#e2d9c8' : '#333' }}>
+            <button key={wl.id} onClick={() => toggleWatchlist(wl.id)}
+              style={{ display: 'flex', alignItems: 'center', gap: '8px', width: '100%', padding: '5px 0', background: 'none', border: 'none', cursor: 'pointer', textAlign: 'left' }}>
+              <span style={{ fontSize: '14px', color: inWatchlists.has(wl.id) ? '#f0ebe0' : '#2a2a2a', transition: 'color 0.2s' }}>
                 {inWatchlists.has(wl.id) ? '◼' : '◻'}
               </span>
-              <span className="text-[11px] tracking-wide" style={{ color: inWatchlists.has(wl.id) ? '#e2d9c8' : '#555' }}>
+              <span style={{ fontSize: '12px', color: inWatchlists.has(wl.id) ? '#e2d9c8' : '#666', transition: 'color 0.2s' }}>
                 {wl.name}
               </span>
             </button>
           ))}
-          <div className="flex gap-2 mt-3">
-            <input
-              value={newListName}
-              onChange={e => setNewListName(e.target.value)}
+          <div style={{ display: 'flex', gap: '8px', marginTop: '10px' }}>
+            <input value={newListName} onChange={e => setNewListName(e.target.value)}
               placeholder="new list name..."
-              className="flex-1 bg-transparent border-b border-[#222] text-[#e2d9c8] font-mono text-[10px] py-1 outline-none focus:border-neutral-600"
-              onKeyDown={e => { if (e.key === 'Enter') createList(); }}
-            />
-            <button onClick={createList} className="text-[10px] text-neutral-600 hover:text-[#e2d9c8] tracking-widest transition-colors">
+              style={{ flex: 1, background: 'transparent', borderBottom: '1px solid #222', color: '#e2d9c8', fontFamily: 'var(--font-mono)', fontSize: '11px', padding: '4px 0', outline: 'none' }}
+              onKeyDown={e => { if (e.key === 'Enter') createList(); }} />
+            <button onClick={createList} style={{ fontSize: '10px', color: '#666', background: 'none', border: 'none', cursor: 'pointer' }}
+              onMouseEnter={e => (e.currentTarget.style.color = '#ccc')}
+              onMouseLeave={e => (e.currentTarget.style.color = '#666')}>
               + create
             </button>
           </div>
@@ -218,35 +195,24 @@ export default function FilmActions({ movie, onAuthRequired }: Props) {
 
       {/* Review panel */}
       {showReview && (
-        <div className="px-4 pb-4 border-t border-[#1a1a1a] pt-3">
-          <div className="text-[9px] tracking-[0.2em] uppercase text-neutral-600 mb-3">
+        <div style={{ padding: '12px 16px 16px', borderTop: '1px solid #1a1a1a' }}>
+          <div style={{ fontSize: '10px', letterSpacing: '0.2em', textTransform: 'uppercase', color: '#666', marginBottom: '10px' }}>
             review — {getTitle(movie)}
           </div>
-          <input
-            value={reviewTitle}
-            onChange={e => setReviewTitle(e.target.value)}
-            placeholder="title (optional)"
-            className="w-full bg-transparent border-b border-[#1e1e1e] text-[#e2d9c8] font-mono text-[11px] py-1 outline-none focus:border-neutral-600 mb-3"
-          />
-          <textarea
-            value={reviewBody}
-            onChange={e => setReviewBody(e.target.value)}
-            placeholder="your thoughts..."
-            rows={4}
-            className="w-full bg-[#0a0a0a] border border-[#1e1e1e] text-[#e2d9c8] font-mono text-[11px] p-3 outline-none focus:border-neutral-700 rounded-sm resize-none leading-relaxed"
-          />
-          <div className="flex items-center justify-between mt-3">
-            <label className="flex items-center gap-2 cursor-pointer">
-              <input type="checkbox" checked={spoiler} onChange={e => setSpoiler(e.target.checked)}
-                className="accent-neutral-600" />
-              <span className="text-[9px] tracking-widest text-neutral-600 uppercase">contains spoilers</span>
+          <input value={reviewTitle} onChange={e => setReviewTitle(e.target.value)} placeholder="title (optional)"
+            style={{ width: '100%', background: 'transparent', borderBottom: '1px solid #1e1e1e', color: '#e2d9c8', fontFamily: 'var(--font-mono)', fontSize: '12px', padding: '4px 0', outline: 'none', marginBottom: '10px' }} />
+          <textarea value={reviewBody} onChange={e => setReviewBody(e.target.value)} placeholder="your thoughts..." rows={4}
+            style={{ width: '100%', background: '#0a0a0a', border: '1px solid #1e1e1e', color: '#e2d9c8', fontFamily: 'var(--font-mono)', fontSize: '12px', padding: '10px', outline: 'none', borderRadius: '3px', resize: 'none', lineHeight: '1.6' }} />
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginTop: '10px' }}>
+            <label style={{ display: 'flex', alignItems: 'center', gap: '6px', cursor: 'pointer' }}>
+              <input type="checkbox" checked={spoiler} onChange={e => setSpoiler(e.target.checked)} />
+              <span style={{ fontSize: '10px', color: '#666', letterSpacing: '0.1em', textTransform: 'uppercase' }}>spoilers</span>
             </label>
-            <button
-              onClick={submitReview}
-              disabled={!reviewBody.trim() || submitting}
-              className="text-[9px] tracking-[0.2em] uppercase px-4 py-2 border border-[#333] text-[#e2d9c8] rounded-sm hover:border-neutral-500 transition-all disabled:opacity-30"
-            >
-              {submitting ? 'saving...' : 'save review'}
+            <button onClick={submitReview} disabled={!reviewBody.trim() || submitting}
+              style={{ fontSize: '10px', letterSpacing: '0.2em', textTransform: 'uppercase', border: '1px solid #333', color: '#e2d9c8', padding: '6px 14px', borderRadius: '3px', background: 'transparent', cursor: 'pointer', opacity: reviewBody.trim() ? 1 : 0.3, transition: 'all 0.2s' }}
+              onMouseEnter={e => { if (reviewBody.trim()) e.currentTarget.style.borderColor = '#888'; }}
+              onMouseLeave={e => { e.currentTarget.style.borderColor = '#333'; }}>
+              {submitting ? 'saving...' : 'save'}
             </button>
           </div>
         </div>
