@@ -29,63 +29,105 @@ function rgbToHex(r: number, g: number, b: number): string {
   return '#' + [r, g, b].map(v => v.toString(16).padStart(2, '0')).join('');
 }
 
-function kMeans(pixels: number[][], k: number, iterations = 8): number[][] {
-  let centroids = pixels.filter((_, i) => i % Math.floor(pixels.length / k) === 0).slice(0, k);
-  for (let iter = 0; iter < iterations; iter++) {
-    const clusters: number[][][] = Array.from({ length: k }, () => []);
-    for (const px of pixels) {
-      let minDist = Infinity, closest = 0;
-      centroids.forEach((c, i) => {
-        const d = Math.sqrt((px[0]-c[0])**2 + (px[1]-c[1])**2 + (px[2]-c[2])**2);
-        if (d < minDist) { minDist = d; closest = i; }
-      });
-      clusters[closest].push(px);
-    }
-    centroids = clusters.map(cluster => {
-      if (!cluster.length) return centroids[0];
-      const avg = [0, 0, 0];
-      cluster.forEach(px => { avg[0] += px[0]; avg[1] += px[1]; avg[2] += px[2]; });
-      return avg.map(v => Math.round(v / cluster.length));
-    });
-  }
-  return centroids;
+// Score a color by how "vibrant" and useful it is for classification.
+// Heavily penalizes near-black, near-white, and near-grey.
+function vibrancyScore(r: number, g: number, b: number): number {
+  const [, s, l] = rgbToHsl(r, g, b);
+  if (s < 15) return 0;
+  if (l < 10 || l > 90) return 0;
+  // Sweet spot: saturated, mid-lightness
+  const lightnessScore = 1 - Math.abs((l - 50) / 50);
+  return (s / 100) * lightnessScore;
 }
 
 export async function extractColors(imageUrl: string): Promise<ColorPalette | null> {
+  try {
+    // Dynamically import Vibrant to keep it client-only
+    const Vibrant = (await import('node-vibrant')).default;
+    const palette = await Vibrant.from(imageUrl)
+      .quality(1)
+      .getPalette();
+
+    // Collect all swatches Vibrant found, ranked by vibrancy
+    const swatches = [
+      palette.Vibrant,
+      palette.LightVibrant,
+      palette.DarkVibrant,
+      palette.Muted,
+      palette.LightMuted,
+      palette.DarkMuted,
+    ]
+      .filter(Boolean)
+      .map(s => ({
+        hex: s!.hex,
+        rgb: s!.rgb,
+        population: s!.population,
+        score: vibrancyScore(s!.rgb[0], s!.rgb[1], s!.rgb[2]) * Math.log1p(s!.population),
+      }))
+      .sort((a, b) => b.score - a.score);
+
+    if (!swatches.length) return null;
+
+    // Best swatch = highest vibrancy * population score
+    const best = swatches[0];
+    const [h, sat, l] = rgbToHsl(best.rgb[0], best.rgb[1], best.rgb[2]);
+
+    return {
+      dominant: best.hex,
+      palette: swatches.map(s => s.hex),
+      hue: h,
+      saturation: sat,
+      lightness: l,
+    };
+  } catch {
+    // Fallback: canvas center-crop with tighter filters
+    return extractColorsCanvas(imageUrl);
+  }
+}
+
+// Fallback canvas extraction with center-crop bias
+async function extractColorsCanvas(imageUrl: string): Promise<ColorPalette | null> {
   return new Promise((resolve) => {
     const img = new Image();
     img.crossOrigin = 'anonymous';
     img.onload = () => {
       try {
         const canvas = document.createElement('canvas');
-        const size = 80;
+        const size = 100;
         canvas.width = size;
         canvas.height = size;
         const ctx = canvas.getContext('2d');
         if (!ctx) { resolve(null); return; }
         ctx.drawImage(img, 0, 0, size, size);
-        const data = ctx.getImageData(0, 0, size, size).data;
-        const pixels: number[][] = [];
-        for (let i = 0; i < data.length; i += 16) {
-          const r = data[i], g = data[i+1], b = data[i+2], a = data[i+3];
+
+        // Sample only the center 60% of the poster
+        const margin = Math.floor(size * 0.2);
+        const cropSize = size - margin * 2;
+        const data = ctx.getImageData(margin, margin, cropSize, cropSize).data;
+
+        const scored: Array<{ r: number; g: number; b: number; score: number }> = [];
+        for (let i = 0; i < data.length; i += 4) {
+          const r = data[i], g = data[i + 1], b = data[i + 2], a = data[i + 3];
           if (a < 128) continue;
-          const [, s, l] = rgbToHsl(r, g, b);
-          if (l < 5 || l > 95 || s < 5) continue;
-          pixels.push([r, g, b]);
+          const score = vibrancyScore(r, g, b);
+          if (score > 0.1) scored.push({ r, g, b, score });
         }
-        if (pixels.length < 10) { resolve(null); return; }
-        const sample = pixels.filter((_, i) => i % 3 === 0);
-        const centroids = kMeans(sample, 5);
-        const sorted = centroids.sort((a, b) => {
-          const [,sa,la] = rgbToHsl(a[0],a[1],a[2]);
-          const [,sb,lb] = rgbToHsl(b[0],b[1],b[2]);
-          return (sb * (1 - Math.abs(lb/100 - 0.5))) - (sa * (1 - Math.abs(la/100 - 0.5)));
-        });
-        const dominant = sorted[0];
-        const [h, s, l] = rgbToHsl(dominant[0], dominant[1], dominant[2]);
+
+        if (scored.length < 5) { resolve(null); return; }
+
+        // Sort by score, take top pixel, compute hue
+        scored.sort((a, b) => b.score - a.score);
+        const best = scored[0];
+        const [h, s, l] = rgbToHsl(best.r, best.g, best.b);
+
+        const paletteHexes = scored
+          .filter((_, i) => i % Math.floor(scored.length / 5) === 0)
+          .slice(0, 5)
+          .map(p => rgbToHex(p.r, p.g, p.b));
+
         resolve({
-          dominant: rgbToHex(dominant[0], dominant[1], dominant[2]),
-          palette: sorted.map(c => rgbToHex(c[0], c[1], c[2])),
+          dominant: rgbToHex(best.r, best.g, best.b),
+          palette: paletteHexes,
           hue: h,
           saturation: s,
           lightness: l,
