@@ -6,6 +6,8 @@ import ColorPicker from '@/components/ColorPicker';
 import PosterCard from '@/components/PosterCard';
 import MovieModal from '@/components/MovieModal';
 import CosmosView from '@/components/CosmosView';
+import AuthModal from '@/components/AuthModal';
+import { useAuth } from '@/context/AuthContext';
 
 const SORT_OPTIONS = [
   { value: 'popularity.desc', label: 'popular' },
@@ -21,7 +23,16 @@ function hueDist(a: number, b: number) {
   return Math.min(d, 360 - d);
 }
 
+const GENRES_MOVIE = [
+  { id: 28, name: 'Action' }, { id: 12, name: 'Adventure' }, { id: 16, name: 'Animation' },
+  { id: 35, name: 'Comedy' }, { id: 80, name: 'Crime' }, { id: 18, name: 'Drama' },
+  { id: 14, name: 'Fantasy' }, { id: 27, name: 'Horror' }, { id: 9648, name: 'Mystery' },
+  { id: 10749, name: 'Romance' }, { id: 878, name: 'Sci-Fi' }, { id: 53, name: 'Thriller' },
+  { id: 37, name: 'Western' }, { id: 10752, name: 'War' }, { id: 36, name: 'History' },
+];
+
 export default function Home() {
+  const { user, profile, signOut } = useAuth();
   const [allMovies, setAllMovies] = useState<Movie[]>([]);
   const [displayed, setDisplayed] = useState<Movie[]>([]);
   const [genres, setGenres] = useState<Record<number, string>>({});
@@ -38,18 +49,37 @@ export default function Home() {
   const [colorMode, setColorMode] = useState<ColorMode>('poster');
   const [filterActive, setFilterActive] = useState(false);
   const [cosmosHue, setCosmosHue] = useState<number | null>(null);
+  const [showAuth, setShowAuth] = useState(false);
   const [pickerHue, setPickerHue] = useState(210);
   const [pickerSat, setPickerSat] = useState(70);
   const [pickerLit, setPickerLit] = useState(45);
 
+  // Filters
+  const [selectedGenres, setSelectedGenres] = useState<Set<number>>(new Set());
+  const [ratingMin, setRatingMin] = useState(0);
+  const [ratingMax, setRatingMax] = useState(10);
+  const [yearMin, setYearMin] = useState(1950);
+  const [yearMax, setYearMax] = useState(2025);
+  const [showFilters, setShowFilters] = useState(false);
+
   const colorizedRef = useRef<Set<number>>(new Set());
   const idSetRef = useRef<Set<number>>(new Set());
-  const moviesRef = useRef<Movie[]>([]);
+
+  const applyFilters = useCallback((movies: Movie[]) => {
+    return movies.filter(m => {
+      const year = parseInt((m.release_date || m.first_air_date || '0').slice(0, 4));
+      const rating = m.vote_average;
+      const genreMatch = selectedGenres.size === 0 || (m.genre_ids || []).some(g => selectedGenres.has(g));
+      const ratingMatch = rating >= ratingMin && rating <= ratingMax;
+      const yearMatch = !year || (year >= yearMin && year <= yearMax);
+      return genreMatch && ratingMatch && yearMatch;
+    });
+  }, [selectedGenres, ratingMin, ratingMax, yearMin, yearMax]);
 
   const colorizeMovies = useCallback(async (movies: Movie[], mode: ColorMode) => {
     const pending = movies.filter(m => {
-      const alreadyDone = mode === 'poster' ? m.colorHue !== undefined : m.cinemaHue !== undefined;
-      return !alreadyDone && (mode === 'poster' ? m.poster_path : m.backdrop_path);
+      const done = mode === 'poster' ? m.colorHue !== undefined : m.cinemaHue !== undefined;
+      return !done && (mode === 'poster' ? m.poster_path : m.backdrop_path);
     });
     if (!pending.length) return;
 
@@ -57,109 +87,75 @@ export default function Home() {
     for (let i = 0; i < pending.length; i += BATCH) {
       const batch = pending.slice(i, i + BATCH);
       try {
-        const body = colorMode === 'poster'
+        const body = mode === 'poster'
           ? { posterPaths: batch.map(m => m.poster_path!) }
           : { backdropPaths: batch.map(m => m.backdrop_path!) };
-
         const res = await fetch('/api/colors', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
+          method: 'POST', headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify(body),
         });
         const { results } = await res.json();
-
         batch.forEach(movie => {
           const key = mode === 'poster' ? movie.poster_path! : movie.backdrop_path!;
           const data = results[key];
           if (data) {
             if (mode === 'poster') {
-              movie.dominantColor = data.dominant;
-              movie.palette = data.palette;
-              movie.colorHue = data.hue;
-              movie.colorSat = data.saturation;
-              movie.colorLit = data.lightness;
+              movie.dominantColor = data.dominant; movie.palette = data.palette;
+              movie.colorHue = data.hue; movie.colorSat = data.saturation; movie.colorLit = data.lightness;
             } else {
-              movie.cinemaColor = data.dominant;
-              movie.cinemaPalette = data.palette;
-              movie.cinemaHue = data.hue;
-              movie.cinemaSat = data.saturation;
-              movie.cinemaLit = data.lightness;
+              movie.cinemaColor = data.dominant; movie.cinemaPalette = data.palette;
+              movie.cinemaHue = data.hue; movie.cinemaSat = data.saturation; movie.cinemaLit = data.lightness;
             }
           }
           colorizedRef.current.add(movie.id);
         });
-
         setExtractCount(prev => prev + batch.length);
         setAllMovies(prev => [...prev]);
-      } catch {
-        batch.forEach(m => colorizedRef.current.add(m.id));
-      }
+      } catch { batch.forEach(m => colorizedRef.current.add(m.id)); }
     }
-  }, [colorMode]);
+  }, []);
 
   const load = useCallback(async (type: 'movie' | 'tv', sortBy: string) => {
     setLoading(true);
-    setAllMovies([]);
-    setDisplayed([]);
-    setFilterActive(false);
-    setExtractCount(0);
-    setTotalCount(0);
-    colorizedRef.current = new Set();
-    idSetRef.current = new Set();
-    moviesRef.current = [];
-
+    setAllMovies([]); setDisplayed([]); setFilterActive(false);
+    setExtractCount(0); setTotalCount(0);
+    colorizedRef.current = new Set(); idSetRef.current = new Set();
     try {
-      const [results, genreList] = await Promise.all([
-        fetchDiscover(type, sortBy, 50),
-        fetchGenres(type),
-      ]);
+      const [results, genreList] = await Promise.all([fetchDiscover(type, sortBy, 50), fetchGenres(type)]);
       const genreMap: Record<number, string> = {};
       genreList.forEach(g => { genreMap[g.id] = g.name; });
       setGenres(genreMap);
       results.forEach(m => idSetRef.current.add(m.id));
-      moviesRef.current = results;
-      setAllMovies(results);
-      setDisplayed(results);
-      setTotalCount(results.length);
-    } catch {
-      setAllMovies([]);
-      setDisplayed([]);
-    }
+      setAllMovies(results); setDisplayed(results); setTotalCount(results.length);
+    } catch { setAllMovies([]); setDisplayed([]); }
     setLoading(false);
   }, []);
 
   useEffect(() => { load(mediaType, sort); }, [mediaType, sort, load]);
 
-  // Colorize initial batch
   useEffect(() => {
-    if (allMovies.length > 0 && !loading) {
-      colorizeMovies(allMovies, colorMode);
-    }
-  }, [allMovies.length, loading, colorMode, colorizeMovies]);
+    if (allMovies.length > 0 && !loading) colorizeMovies(allMovies, colorMode);
+  }, [allMovies.length, loading, colorMode]);
 
-  // Background load more pages (51–400)
   useEffect(() => {
     if (loading || bgLoading) return;
-    const type = mediaType;
-    const sortBy = sort;
     setBgLoading(true);
-
-    fetchMorePages(type, sortBy, 51, 400, idSetRef.current, (batch) => {
-      moviesRef.current = [...moviesRef.current, ...batch];
+    fetchMorePages(mediaType, sort, 51, 400, idSetRef.current, (batch) => {
       setAllMovies(prev => {
         const next = [...prev, ...batch];
         setTotalCount(next.length);
-        // Colorize new batch
         colorizeMovies(batch, colorMode);
         return next;
       });
     }).finally(() => setBgLoading(false));
-  }, [loading]);  // only run once after initial load
+  }, [loading]);
+
+  // Re-apply filters when filter state changes
+  useEffect(() => {
+    if (!filterActive) setDisplayed(applyFilters(allMovies));
+  }, [selectedGenres, ratingMin, ratingMax, yearMin, yearMax, allMovies.length]);
 
   const handleGo = useCallback((h: number, s: number, l: number) => {
-    setFilterActive(true);
-    setCosmosHue(h);
-
     const isPoster = colorMode === 'poster';
     const filtered = allMovies.filter(m => {
       const mh = isPoster ? m.colorHue : m.cinemaHue;
@@ -168,88 +164,78 @@ export default function Home() {
       if (mh === undefined) return false;
       return hueDist(mh, h) < 15 && Math.abs((ms ?? 50) - s) < 25 && Math.abs((ml ?? 50) - l) < 40;
     });
-
-    // Relax if too few
-    if (filtered.length < 8) {
-      const hueOnly = allMovies.filter(m => {
+    const base = filtered.length >= 8 ? filtered :
+      allMovies.filter(m => {
         const mh = isPoster ? m.colorHue : m.cinemaHue;
         return mh !== undefined && hueDist(mh, h) < 25;
       });
-      setDisplayed(hueOnly.length > 0 ? hueOnly : allMovies);
-    } else {
-      setDisplayed(filtered);
-    }
-  }, [allMovies, colorMode]);
-
-  const handleClear = () => {
-    setDisplayed(allMovies);
-    setFilterActive(false);
-    setCosmosHue(null);
-  };
+    setDisplayed(applyFilters(base.length > 0 ? base : allMovies));
+    setFilterActive(true);
+    setCosmosHue(h);
+  }, [allMovies, colorMode, applyFilters]);
 
   const handleSearch = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!searchQuery.trim()) return;
     setLoading(true);
-    colorizedRef.current = new Set();
-    setFilterActive(false);
+    colorizedRef.current = new Set(); setFilterActive(false);
     const { searchMovies } = await import('@/lib/tmdb');
     const results = await searchMovies(searchQuery);
-    setAllMovies(results);
-    setDisplayed(results);
-    setLoading(false);
-    setShowSearch(false);
+    setAllMovies(results); setDisplayed(results);
+    setLoading(false); setShowSearch(false);
   };
 
-  const countLabel = loading
-    ? 'loading...'
-    : filterActive
-    ? `${displayed.length} matches · ${totalCount} total`
-    : bgLoading
-    ? `${totalCount} films · loading more...`
+  const toggleGenre = (id: number) => {
+    setSelectedGenres(prev => {
+      const s = new Set(prev);
+      s.has(id) ? s.delete(id) : s.add(id);
+      return s;
+    });
+  };
+
+  const countLabel = loading ? 'loading...'
+    : filterActive ? `${displayed.length} matches · ${totalCount} total`
+    : bgLoading ? `${totalCount} films · loading more...`
     : `${totalCount} films`;
 
   return (
     <main className="min-h-screen bg-[#070707]">
+      {/* Header */}
       <header className="flex items-center justify-between px-8 pt-8 pb-0">
         <div className="flex items-baseline gap-5">
-          <h1
-            className="font-display font-light tracking-[0.1em] text-[#e2d9c8]"
-            style={{ fontFamily: 'var(--font-display)', fontSize: '38px' }}
-          >
+          <h1 className="font-display font-light tracking-[0.1em] text-[#e2d9c8]"
+            style={{ fontFamily: 'var(--font-display)', fontSize: '38px' }}>
             lumi<span className="italic text-neutral-500">ère</span>
           </h1>
-          <span className="text-[11px] tracking-[0.25em] text-neutral-700 uppercase hidden sm:block">
-            cinema by colour
-          </span>
+          <span className="text-[11px] tracking-[0.25em] text-neutral-700 uppercase hidden sm:block">cinema by colour</span>
         </div>
 
         <div className="flex items-center gap-5">
-          {filterActive && (
-            <button
-              onClick={handleClear}
-              className="text-[11px] tracking-[0.2em] uppercase text-neutral-700 hover:text-[#e2d9c8] transition-colors"
-            >
-              clear
+          {user ? (
+            <div className="flex items-center gap-4">
+              <a href="/profile" className="text-[11px] tracking-[0.15em] text-neutral-500 hover:text-[#e2d9c8] transition-colors">
+                {profile?.username}
+              </a>
+              <button onClick={signOut} className="text-[10px] tracking-[0.2em] uppercase text-neutral-700 hover:text-neutral-500 transition-colors">out</button>
+            </div>
+          ) : (
+            <button onClick={() => setShowAuth(true)} className="text-[11px] tracking-[0.2em] uppercase text-neutral-600 hover:text-[#e2d9c8] transition-colors">
+              sign in
             </button>
           )}
-          <button
-            onClick={() => setShowSearch(s => !s)}
-            className="text-[11px] tracking-[0.2em] uppercase text-neutral-600 hover:text-[#e2d9c8] transition-colors"
-          >
+          {filterActive && (
+            <button onClick={() => { setDisplayed(applyFilters(allMovies)); setFilterActive(false); setCosmosHue(null); }}
+              className="text-[11px] tracking-[0.2em] uppercase text-neutral-700 hover:text-[#e2d9c8] transition-colors">clear</button>
+          )}
+          <button onClick={() => setShowSearch(s => !s)}
+            className="text-[11px] tracking-[0.2em] uppercase text-neutral-600 hover:text-[#e2d9c8] transition-colors">
             {showSearch ? 'cancel' : 'search'}
           </button>
           <div className="flex items-center gap-1 border border-[#1e1e1e] rounded-sm overflow-hidden">
             {(['grid', 'cosmos'] as ViewMode[]).map(v => (
-              <button
-                key={v}
-                onClick={() => setViewMode(v)}
+              <button key={v} onClick={() => setViewMode(v)}
                 className="text-[10px] tracking-[0.15em] uppercase px-3 py-[5px] transition-all duration-200"
-                style={{
-                  background: viewMode === v ? '#1a1a1a' : 'transparent',
-                  color: viewMode === v ? '#e2d9c8' : '#444',
-                }}
-              >
+                style={{ background: viewMode === v ? '#1a1a1a' : 'transparent', color: viewMode === v ? '#e2d9c8' : '#444' }}>
                 {v}
               </button>
             ))}
@@ -259,68 +245,116 @@ export default function Home() {
 
       {showSearch && (
         <form onSubmit={handleSearch} className="px-8 pt-5">
-          <input
-            autoFocus
-            value={searchQuery}
-            onChange={e => setSearchQuery(e.target.value)}
+          <input autoFocus value={searchQuery} onChange={e => setSearchQuery(e.target.value)}
             placeholder="search films, series..."
-            className="w-full bg-transparent border-b border-[#222] text-[#e2d9c8] font-mono text-[12px] tracking-wider py-2 outline-none placeholder-neutral-700 focus:border-neutral-600 transition-colors"
-          />
+            className="w-full bg-transparent border-b border-[#222] text-[#e2d9c8] font-mono text-[12px] tracking-wider py-2 outline-none placeholder-neutral-700 focus:border-neutral-600 transition-colors" />
         </form>
       )}
 
-      {/* Color mode toggle + picker */}
+      {/* Color source toggle */}
       <div className="px-8 pt-6">
         <div className="flex items-center gap-6 mb-4">
           <div className="text-[11px] tracking-[0.25em] text-neutral-600 uppercase">colour source</div>
           <div className="flex items-center gap-1 border border-[#1e1e1e] rounded-sm overflow-hidden">
             {(['poster', 'cinema'] as ColorMode[]).map(m => (
-              <button
-                key={m}
-                onClick={() => setColorMode(m)}
+              <button key={m} onClick={() => setColorMode(m)}
                 className="text-[10px] tracking-[0.15em] uppercase px-3 py-[5px] transition-all duration-200"
-                style={{
-                  background: colorMode === m ? '#1a1a1a' : 'transparent',
-                  color: colorMode === m ? '#e2d9c8' : '#444',
-                }}
-              >
+                style={{ background: colorMode === m ? '#1a1a1a' : 'transparent', color: colorMode === m ? '#e2d9c8' : '#444' }}>
                 {m === 'poster' ? 'poster art' : 'film scene'}
               </button>
             ))}
           </div>
-          <span className="text-[10px] text-neutral-700 tracking-wide">
-            {colorMode === 'poster' ? 'colour from poster artwork' : 'colour from actual film scenes'}
-          </span>
         </div>
       </div>
 
-      <ColorPicker
-        hue={pickerHue}
-        saturation={pickerSat}
-        lightness={pickerLit}
+      <ColorPicker hue={pickerHue} saturation={pickerSat} lightness={pickerLit}
         onChange={(h, s, l) => { setPickerHue(h); setPickerSat(s); setPickerLit(l); }}
-        onGo={handleGo}
-      />
+        onGo={handleGo} />
 
-      <div className="flex items-center justify-between px-8 py-4 border-b border-[#111] mt-5">
+      {/* Filters row */}
+      <div className="px-8 pt-5">
+        <button onClick={() => setShowFilters(f => !f)}
+          className="text-[10px] tracking-[0.2em] uppercase text-neutral-700 hover:text-neutral-400 transition-colors mb-3 flex items-center gap-2">
+          <span>filters</span>
+          {(selectedGenres.size > 0 || ratingMin > 0 || ratingMax < 10 || yearMin > 1950 || yearMax < 2025) && (
+            <span className="text-[8px] bg-neutral-800 text-neutral-400 px-1 rounded">active</span>
+          )}
+          <span>{showFilters ? '↑' : '↓'}</span>
+        </button>
+
+        {showFilters && (
+          <div className="pb-4 border-b border-[#111]">
+            {/* Genres */}
+            <div className="mb-4">
+              <div className="text-[9px] tracking-[0.2em] uppercase text-neutral-700 mb-2">genre</div>
+              <div className="flex flex-wrap gap-2">
+                {GENRES_MOVIE.map(g => (
+                  <button key={g.id} onClick={() => toggleGenre(g.id)}
+                    className="text-[9px] tracking-[0.1em] px-2 py-[3px] rounded-sm border transition-all duration-150"
+                    style={{
+                      borderColor: selectedGenres.has(g.id) ? '#888' : '#1e1e1e',
+                      color: selectedGenres.has(g.id) ? '#e2d9c8' : '#555',
+                      background: selectedGenres.has(g.id) ? '#1a1a1a' : 'transparent',
+                    }}>
+                    {g.name}
+                  </button>
+                ))}
+              </div>
+            </div>
+
+            {/* Rating range */}
+            <div className="mb-4 flex items-center gap-6">
+              <div>
+                <div className="text-[9px] tracking-[0.2em] uppercase text-neutral-700 mb-2">imdb rating</div>
+                <div className="flex items-center gap-3">
+                  <input type="range" min="0" max="10" step="0.5" value={ratingMin}
+                    onChange={e => setRatingMin(Number(e.target.value))}
+                    className="w-24 accent-neutral-600" />
+                  <span className="text-[10px] text-neutral-500 w-8">{ratingMin}</span>
+                  <span className="text-[10px] text-neutral-700">–</span>
+                  <input type="range" min="0" max="10" step="0.5" value={ratingMax}
+                    onChange={e => setRatingMax(Number(e.target.value))}
+                    className="w-24 accent-neutral-600" />
+                  <span className="text-[10px] text-neutral-500 w-8">{ratingMax}</span>
+                </div>
+              </div>
+
+              {/* Year range */}
+              <div>
+                <div className="text-[9px] tracking-[0.2em] uppercase text-neutral-700 mb-2">year</div>
+                <div className="flex items-center gap-3">
+                  <input type="range" min="1900" max="2025" step="1" value={yearMin}
+                    onChange={e => setYearMin(Number(e.target.value))}
+                    className="w-24 accent-neutral-600" />
+                  <span className="text-[10px] text-neutral-500 w-10">{yearMin}</span>
+                  <span className="text-[10px] text-neutral-700">–</span>
+                  <input type="range" min="1900" max="2025" step="1" value={yearMax}
+                    onChange={e => setYearMax(Number(e.target.value))}
+                    className="w-24 accent-neutral-600" />
+                  <span className="text-[10px] text-neutral-500 w-10">{yearMax}</span>
+                </div>
+              </div>
+            </div>
+
+            <button onClick={() => { setSelectedGenres(new Set()); setRatingMin(0); setRatingMax(10); setYearMin(1950); setYearMax(2025); }}
+              className="text-[9px] tracking-widest uppercase text-neutral-700 hover:text-neutral-500 transition-colors">
+              reset filters
+            </button>
+          </div>
+        )}
+      </div>
+
+      <div className="flex items-center justify-between px-8 py-4 border-b border-[#111] mt-2">
         <div className="text-[11px] text-neutral-600 tracking-widest">{countLabel}</div>
         <div className="flex items-center gap-3">
-          <select
-            value={mediaType}
-            onChange={e => setMediaType(e.target.value as 'movie' | 'tv')}
-            className="bg-[#070707] border border-[#1e1e1e] text-neutral-500 font-mono text-[10px] tracking-widest uppercase py-[5px] px-3 rounded-sm outline-none cursor-pointer hover:border-[#333] transition-colors appearance-none"
-          >
+          <select value={mediaType} onChange={e => setMediaType(e.target.value as 'movie' | 'tv')}
+            className="bg-[#070707] border border-[#1e1e1e] text-neutral-500 font-mono text-[10px] tracking-widest uppercase py-[5px] px-3 rounded-sm outline-none cursor-pointer hover:border-[#333] transition-colors appearance-none">
             <option value="movie">films</option>
             <option value="tv">series</option>
           </select>
-          <select
-            value={sort}
-            onChange={e => setSort(e.target.value)}
-            className="bg-[#070707] border border-[#1e1e1e] text-neutral-500 font-mono text-[10px] tracking-widest uppercase py-[5px] px-3 rounded-sm outline-none cursor-pointer hover:border-[#333] transition-colors appearance-none"
-          >
-            {SORT_OPTIONS.map(o => (
-              <option key={o.value} value={o.value}>{o.label}</option>
-            ))}
+          <select value={sort} onChange={e => setSort(e.target.value)}
+            className="bg-[#070707] border border-[#1e1e1e] text-neutral-500 font-mono text-[10px] tracking-widest uppercase py-[5px] px-3 rounded-sm outline-none cursor-pointer hover:border-[#333] transition-colors appearance-none">
+            {SORT_OPTIONS.map(o => <option key={o.value} value={o.value}>{o.label}</option>)}
           </select>
         </div>
       </div>
@@ -349,7 +383,8 @@ export default function Home() {
         </div>
       )}
 
-      <MovieModal movie={selected} genres={genres} onClose={() => setSelected(null)} />
+      <MovieModal movie={selected} genres={genres} onClose={() => setSelected(null)} onAuthRequired={() => setShowAuth(true)} />
+      {showAuth && <AuthModal onClose={() => setShowAuth(false)} />}
     </main>
   );
 }
