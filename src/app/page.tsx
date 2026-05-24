@@ -2,8 +2,8 @@
 
 import { useState, useEffect, useCallback, useRef } from 'react';
 import { Movie, fetchDiscover, fetchGenres } from '@/lib/tmdb';
-import { hueToRange, HUE_RANGES } from '@/lib/colors';
-import SpectrumBar from '@/components/SpectrumBar';
+import { hueToRange } from '@/lib/colors';
+import ColorPicker from '@/components/ColorPicker';
 import PosterCard from '@/components/PosterCard';
 import MovieModal from '@/components/MovieModal';
 import CosmosView from '@/components/CosmosView';
@@ -15,6 +15,11 @@ const SORT_OPTIONS = [
 ];
 
 type ViewMode = 'grid' | 'cosmos';
+
+function hueDist(a: number, b: number) {
+  const d = Math.abs(a - b);
+  return Math.min(d, 360 - d);
+}
 
 export default function Home() {
   const [allMovies, setAllMovies] = useState<Movie[]>([]);
@@ -28,10 +33,15 @@ export default function Home() {
   const [sort, setSort] = useState('popularity.desc');
   const [searchQuery, setSearchQuery] = useState('');
   const [showSearch, setShowSearch] = useState(false);
-  const [activeHue, setActiveHue] = useState(7);
-  const [filterActive, setFilterActive] = useState(false);
   const [viewMode, setViewMode] = useState<ViewMode>('grid');
+  const [filterActive, setFilterActive] = useState(false);
   const [cosmosHue, setCosmosHue] = useState<number | null>(null);
+
+  // Color picker state
+  const [pickerHue, setPickerHue] = useState(210);
+  const [pickerSat, setPickerSat] = useState(70);
+  const [pickerLit, setPickerLit] = useState(45);
+
   const colorizedRef = useRef<Set<number>>(new Set());
 
   const load = useCallback(async (type: 'movie' | 'tv', sortBy: string) => {
@@ -60,7 +70,6 @@ export default function Home() {
 
   useEffect(() => { load(mediaType, sort); }, [mediaType, sort, load]);
 
-  // Server-side color extraction in batches
   const colorizeMovies = useCallback(async (movies: Movie[]) => {
     const pending = movies.filter(m => !colorizedRef.current.has(m.id) && m.poster_path);
     if (!pending.length) return;
@@ -69,16 +78,13 @@ export default function Home() {
     const BATCH = 20;
     for (let i = 0; i < pending.length; i += BATCH) {
       const batch = pending.slice(i, i + BATCH);
-      const posterPaths = batch.map(m => m.poster_path!);
-
       try {
         const res = await fetch('/api/colors', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ posterPaths }),
+          body: JSON.stringify({ posterPaths: batch.map(m => m.poster_path!) }),
         });
         const { results } = await res.json();
-
         batch.forEach(movie => {
           const data = results[movie.poster_path!];
           if (data) {
@@ -90,14 +96,12 @@ export default function Home() {
           }
           colorizedRef.current.add(movie.id);
         });
-
         setExtractCount(colorizedRef.current.size);
         setAllMovies(prev => [...prev]);
       } catch {
         batch.forEach(m => colorizedRef.current.add(m.id));
       }
     }
-
     setExtracting(false);
   }, []);
 
@@ -105,17 +109,28 @@ export default function Home() {
     if (allMovies.length > 0) colorizeMovies(allMovies);
   }, [allMovies.length, colorizeMovies]);
 
-  const handleGo = useCallback((hueIndex: number) => {
-    const range = HUE_RANGES[hueIndex];
+  const handleGo = useCallback((h: number, s: number, l: number) => {
     setFilterActive(true);
-    setCosmosHue(range.min + (range.max - range.min) / 2);
+    setCosmosHue(h);
 
+    // Match films whose hue is within 22°, saturation within 30, lightness within 30
     const filtered = allMovies.filter(m => {
       if (m.colorHue === undefined) return false;
-      const idx = hueToRange(m.colorHue);
-      return idx === hueIndex;
+      const hd = hueDist(m.colorHue, h);
+      const sd = Math.abs((m.colorSat ?? 50) - s);
+      const ld = Math.abs((m.colorLit ?? 50) - l);
+      return hd < 22 && sd < 35 && ld < 35;
     });
-    setDisplayed(filtered.length > 0 ? filtered : allMovies);
+
+    // If too few matches, relax to hue-only
+    if (filtered.length < 5) {
+      const hueOnly = allMovies.filter(m =>
+        m.colorHue !== undefined && hueDist(m.colorHue, h) < 30
+      );
+      setDisplayed(hueOnly.length > 0 ? hueOnly : allMovies);
+    } else {
+      setDisplayed(filtered);
+    }
   }, [allMovies]);
 
   const handleClear = () => {
@@ -143,7 +158,7 @@ export default function Home() {
     : extracting
     ? `colouring ${extractCount} / ${allMovies.length}`
     : filterActive
-    ? `${displayed.length} in hue · ${allMovies.length} total`
+    ? `${displayed.length} matches · ${allMovies.length} total`
     : `${displayed.length} films`;
 
   return (
@@ -175,7 +190,6 @@ export default function Home() {
           >
             {showSearch ? 'cancel' : 'search'}
           </button>
-          {/* View toggle */}
           <div className="flex items-center gap-1 border border-[#1e1e1e] rounded-sm overflow-hidden">
             {(['grid', 'cosmos'] as ViewMode[]).map(v => (
               <button
@@ -206,7 +220,13 @@ export default function Home() {
         </form>
       )}
 
-      <SpectrumBar activeIndex={activeHue} onSelect={setActiveHue} onGo={handleGo} />
+      <ColorPicker
+        hue={pickerHue}
+        saturation={pickerSat}
+        lightness={pickerLit}
+        onChange={(h, s, l) => { setPickerHue(h); setPickerSat(s); setPickerLit(l); }}
+        onGo={handleGo}
+      />
 
       <div className="flex items-center justify-between px-8 py-4 border-b border-[#111] mt-4">
         <div className="text-[10px] text-neutral-600 tracking-widest">{countLabel}</div>
@@ -232,11 +252,7 @@ export default function Home() {
       </div>
 
       {viewMode === 'cosmos' ? (
-        <CosmosView
-          movies={allMovies}
-          onSelect={setSelected}
-          activeHue={cosmosHue}
-        />
+        <CosmosView movies={allMovies} onSelect={setSelected} activeHue={cosmosHue} />
       ) : (
         <div className="px-8 py-6">
           {loading ? (
