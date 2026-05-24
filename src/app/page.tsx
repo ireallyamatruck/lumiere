@@ -274,27 +274,30 @@ export default function Home() {
       {/* Filters row */}
       <div className="px-8 pt-5">
         <button onClick={() => setShowFilters(f => !f)}
-          className="text-[10px] tracking-[0.2em] uppercase text-neutral-700 hover:text-neutral-400 transition-colors mb-3 flex items-center gap-2">
+          className="flex items-center gap-2 mb-3 transition-colors"
+          style={{ fontSize: '12px', letterSpacing: '0.2em', textTransform: 'uppercase', color: showFilters ? '#ccc' : '#888' }}>
           <span>filters</span>
           {(selectedGenres.size > 0 || ratingMin > 0 || ratingMax < 10 || yearMin > 1950 || yearMax < 2025) && (
-            <span className="text-[8px] bg-neutral-800 text-neutral-400 px-1 rounded">active</span>
+            <span style={{ fontSize: '9px', background: '#2a2a2a', color: '#ccc', padding: '1px 6px', borderRadius: '3px' }}>active</span>
           )}
           <span>{showFilters ? '↑' : '↓'}</span>
         </button>
 
         {showFilters && (
-          <div className="pb-4 border-b border-[#111]">
+          <div className="pb-5 border-b border-[#1a1a1a]">
             {/* Genres */}
-            <div className="mb-4">
-              <div className="text-[9px] tracking-[0.2em] uppercase text-neutral-700 mb-2">genre</div>
+            <div className="mb-5">
+              <div style={{ fontSize: '11px', letterSpacing: '0.2em', textTransform: 'uppercase', color: '#999', marginBottom: '10px' }}>genre</div>
               <div className="flex flex-wrap gap-2">
                 {GENRES_MOVIE.map(g => (
                   <button key={g.id} onClick={() => toggleGenre(g.id)}
-                    className="text-[9px] tracking-[0.1em] px-2 py-[3px] rounded-sm border transition-all duration-150"
+                    className="transition-all duration-150"
                     style={{
-                      borderColor: selectedGenres.has(g.id) ? '#888' : '#1e1e1e',
-                      color: selectedGenres.has(g.id) ? '#e2d9c8' : '#555',
-                      background: selectedGenres.has(g.id) ? '#1a1a1a' : 'transparent',
+                      fontSize: '11px', letterSpacing: '0.08em', padding: '4px 10px', borderRadius: '3px',
+                      border: `1px solid ${selectedGenres.has(g.id) ? '#aaa' : '#2a2a2a'}`,
+                      color: selectedGenres.has(g.id) ? '#f0ebe0' : '#777',
+                      background: selectedGenres.has(g.id) ? '#222' : 'transparent',
+                      cursor: 'pointer',
                     }}>
                     {g.name}
                   </button>
@@ -302,44 +305,62 @@ export default function Home() {
               </div>
             </div>
 
-            {/* Rating range */}
-            <div className="mb-4 flex items-center gap-6">
+            {/* Rating + Year side by side */}
+            <div className="flex flex-wrap gap-8 mb-5">
               <div>
-                <div className="text-[9px] tracking-[0.2em] uppercase text-neutral-700 mb-2">imdb rating</div>
+                <div style={{ fontSize: '11px', letterSpacing: '0.2em', textTransform: 'uppercase', color: '#999', marginBottom: '10px' }}>
+                  imdb rating
+                </div>
                 <div className="flex items-center gap-3">
+                  <span style={{ fontSize: '12px', color: '#aaa', minWidth: '28px' }}>{ratingMin.toFixed(1)}</span>
                   <input type="range" min="0" max="10" step="0.5" value={ratingMin}
-                    onChange={e => setRatingMin(Number(e.target.value))}
-                    className="w-24 accent-neutral-600" />
-                  <span className="text-[10px] text-neutral-500 w-8">{ratingMin}</span>
-                  <span className="text-[10px] text-neutral-700">–</span>
+                    onChange={e => setRatingMin(Math.min(Number(e.target.value), ratingMax))}
+                    className="w-28 accent-neutral-500" />
+                  <span style={{ fontSize: '12px', color: '#777' }}>–</span>
                   <input type="range" min="0" max="10" step="0.5" value={ratingMax}
-                    onChange={e => setRatingMax(Number(e.target.value))}
-                    className="w-24 accent-neutral-600" />
-                  <span className="text-[10px] text-neutral-500 w-8">{ratingMax}</span>
+                    onChange={e => setRatingMax(Math.max(Number(e.target.value), ratingMin))}
+                    className="w-28 accent-neutral-500" />
+                  <span style={{ fontSize: '12px', color: '#aaa', minWidth: '28px' }}>{ratingMax.toFixed(1)}</span>
                 </div>
               </div>
 
-              {/* Year range */}
               <div>
-                <div className="text-[9px] tracking-[0.2em] uppercase text-neutral-700 mb-2">year</div>
+                <div style={{ fontSize: '11px', letterSpacing: '0.2em', textTransform: 'uppercase', color: '#999', marginBottom: '10px' }}>
+                  year
+                </div>
                 <div className="flex items-center gap-3">
+                  <span style={{ fontSize: '12px', color: '#aaa', minWidth: '36px' }}>{yearMin}</span>
                   <input type="range" min="1900" max="2025" step="1" value={yearMin}
-                    onChange={e => setYearMin(Number(e.target.value))}
-                    className="w-24 accent-neutral-600" />
-                  <span className="text-[10px] text-neutral-500 w-10">{yearMin}</span>
-                  <span className="text-[10px] text-neutral-700">–</span>
+                    onChange={e => setYearMin(Math.min(Number(e.target.value), yearMax))}
+                    className="w-28 accent-neutral-500" />
+                  <span style={{ fontSize: '12px', color: '#777' }}>–</span>
                   <input type="range" min="1900" max="2025" step="1" value={yearMax}
-                    onChange={e => setYearMax(Number(e.target.value))}
-                    className="w-24 accent-neutral-600" />
-                  <span className="text-[10px] text-neutral-500 w-10">{yearMax}</span>
+                    onChange={e => setYearMax(Math.max(Number(e.target.value), yearMin))}
+                    className="w-28 accent-neutral-500" />
+                  <span style={{ fontSize: '12px', color: '#aaa', minWidth: '36px' }}>{yearMax}</span>
                 </div>
               </div>
             </div>
 
-            <button onClick={() => { setSelectedGenres(new Set()); setRatingMin(0); setRatingMax(10); setYearMin(1950); setYearMax(2025); }}
-              className="text-[9px] tracking-widest uppercase text-neutral-700 hover:text-neutral-500 transition-colors">
-              reset filters
-            </button>
+            {/* Apply + Reset */}
+            <div className="flex items-center gap-4">
+              <button
+                onClick={() => { setDisplayed(applyFilters(allMovies)); setShowFilters(false); }}
+                style={{ fontSize: '11px', letterSpacing: '0.2em', textTransform: 'uppercase', border: '1px solid #aaa', color: '#f0ebe0', padding: '7px 20px', borderRadius: '3px', background: 'transparent', cursor: 'pointer', transition: 'all 0.2s' }}
+                onMouseEnter={e => (e.currentTarget.style.background = '#1a1a1a')}
+                onMouseLeave={e => (e.currentTarget.style.background = 'transparent')}
+              >
+                apply filters
+              </button>
+              <button
+                onClick={() => { setSelectedGenres(new Set()); setRatingMin(0); setRatingMax(10); setYearMin(1950); setYearMax(2025); setDisplayed(allMovies); }}
+                style={{ fontSize: '11px', letterSpacing: '0.15em', textTransform: 'uppercase', color: '#666', background: 'none', border: 'none', cursor: 'pointer' }}
+                onMouseEnter={e => (e.currentTarget.style.color = '#aaa')}
+                onMouseLeave={e => (e.currentTarget.style.color = '#666')}
+              >
+                reset
+              </button>
+            </div>
           </div>
         )}
       </div>

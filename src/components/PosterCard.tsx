@@ -35,12 +35,14 @@ export default function PosterCard({ movie, index, onClick }: Props) {
 
       <div className="poster-overlay">
         <div
-          className="font-display text-[13px] font-light leading-tight text-[#e2d9c8]"
-          style={{ fontFamily: 'var(--font-display)' }}
+          className="font-display font-light leading-tight"
+          style={{ fontFamily: 'var(--font-display)', fontSize: '16px', color: '#f5f0e8' }}
         >
           {title}
         </div>
-        <div className="text-[9px] text-neutral-500 tracking-widest mt-1">{year}</div>
+        <div style={{ fontSize: '11px', color: '#aaa', letterSpacing: '0.12em', marginTop: '4px' }}>
+          {year}
+        </div>
       </div>
     </div>
   );
