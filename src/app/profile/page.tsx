@@ -76,77 +76,89 @@ export default function ProfilePage() {
     return data;
   };
 
+  const [pageLoading, setPageLoading] = useState(true);
+
   const loadAll = async () => {
     if (!user) return;
     const uid = user.id;
+    try {
+      const [
+        { data: watched },
+        { data: likedData },
+        { data: reviewData },
+        { data: listData },
+      ] = await Promise.all([
+        supabase.from('watched').select('*').eq('user_id', uid).order('watched_at', { ascending: false }),
+        supabase.from('likes').select('*').eq('user_id', uid).order('created_at', { ascending: false }),
+        supabase.from('reviews').select('*').eq('user_id', uid).order('created_at', { ascending: false }),
+        supabase.from('watchlists').select('*, watchlist_items(count)').eq('user_id', uid),
+      ]);
 
-    const [
-      { data: watched },
-      { data: likedData },
-      { data: reviewData },
-      { data: listData },
-      { data: followingData },
-      { data: followersData },
-    ] = await Promise.all([
-      supabase.from('watched').select('*').eq('user_id', uid).order('watched_at', { ascending: false }),
-      supabase.from('likes').select('*').eq('user_id', uid).order('created_at', { ascending: false }),
-      supabase.from('reviews').select('*').eq('user_id', uid).order('created_at', { ascending: false }),
-      supabase.from('watchlists').select('*, watchlist_items(count)').eq('user_id', uid),
-      supabase.from('follows').select('*, profiles!follows_following_id_fkey(username, display_name)').eq('follower_id', uid),
-      supabase.from('follows').select('*, profiles!follows_follower_id_fkey(username, display_name)').eq('following_id', uid),
-    ]);
+      const [followingRes, followersRes] = await Promise.all([
+        supabase.from('follows').select('*, profiles!follows_following_id_fkey(username, display_name)').eq('follower_id', uid),
+        supabase.from('follows').select('*, profiles!follows_follower_id_fkey(username, display_name)').eq('following_id', uid),
+      ]);
+      const followingData = followingRes.error ? [] : (followingRes.data || []);
+      const followersData = followersRes.error ? [] : (followersRes.data || []);
 
-    setStats({
-      films: watched?.length || 0,
-      reviews: reviewData?.length || 0,
-      lists: listData?.length || 0,
-      following: followingData?.length || 0,
-      followers: followersData?.length || 0,
-      likes: likedData?.length || 0,
-    });
+      setStats({
+        films: watched?.length || 0,
+        reviews: reviewData?.length || 0,
+        lists: listData?.length || 0,
+        following: followingData.length,
+        followers: followersData.length,
+        likes: likedData?.length || 0,
+      });
+      setFollowing(followingData);
+      setFollowers(followersData);
+      setReviews(reviewData || []);
+      setLists(listData || []);
 
-    setFollowing(followingData || []);
-    setFollowers(followersData || []);
-    setReviews(reviewData || []);
-    setLists(listData || []);
+      const watchedWithData = await Promise.all(
+        (watched || []).slice(0, 20).map(async w => {
+          try {
+            const d = await fetchTmdb(w.tmdb_id, w.media_type);
+            return { ...w, poster_path: d?.poster_path, title: d?.title || d?.name };
+          } catch { return { ...w, poster_path: null, title: '' }; }
+        })
+      );
+      setWatchedPosters(watchedWithData);
 
-    // Fetch TMDB data for watched + liked
-    const watchedWithData = await Promise.all(
-      (watched || []).slice(0, 40).map(async w => {
-        const d = await fetchTmdb(w.tmdb_id, w.media_type);
-        return { ...w, poster_path: d?.poster_path, title: d?.title || d?.name, color: null };
-      })
-    );
-    setWatchedPosters(watchedWithData);
+      const likedWithData = await Promise.all(
+        (likedData || []).slice(0, 20).map(async l => {
+          try {
+            const d = await fetchTmdb(l.tmdb_id, l.media_type);
+            return { ...l, poster_path: d?.poster_path, title: d?.title || d?.name };
+          } catch { return { ...l, poster_path: null, title: '' }; }
+        })
+      );
+      setLikedPosters(likedWithData);
 
-    const likedWithData = await Promise.all(
-      (likedData || []).slice(0, 40).map(async l => {
-        const d = await fetchTmdb(l.tmdb_id, l.media_type);
-        return { ...l, poster_path: d?.poster_path, title: d?.title || d?.name };
-      })
-    );
-    setLikedPosters(likedWithData);
+      const acts: ActivityItem[] = [
+        ...(watched || []).slice(0, 10).map((w: any) => ({ type: 'watched' as const, tmdb_id: w.tmdb_id, date: w.watched_at, media_type: w.media_type })),
+        ...(likedData || []).slice(0, 10).map((l: any) => ({ type: 'like' as const, tmdb_id: l.tmdb_id, date: l.created_at, media_type: l.media_type })),
+        ...(reviewData || []).slice(0, 10).map((r: any) => ({ type: 'review' as const, tmdb_id: r.tmdb_id, date: r.created_at, body: r.body, media_type: r.media_type })),
+      ].sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime()).slice(0, 20);
 
-    // Build activity timeline
-    const acts: ActivityItem[] = [
-      ...(watched || []).slice(0, 20).map((w: any) => ({ type: 'watched' as const, tmdb_id: w.tmdb_id, date: w.watched_at })),
-      ...(likedData || []).slice(0, 20).map((l: any) => ({ type: 'like' as const, tmdb_id: l.tmdb_id, date: l.created_at })),
-      ...(reviewData || []).slice(0, 20).map((r: any) => ({ type: 'review' as const, tmdb_id: r.tmdb_id, date: r.created_at, body: r.body })),
-    ].sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime());
+      const enriched = await Promise.all(acts.map(async a => {
+        try {
+          const d = await fetchTmdb(a.tmdb_id, (a as any).media_type || 'movie');
+          return { ...a, poster_path: d?.poster_path, title: d?.title || d?.name };
+        } catch { return { ...a, poster_path: null, title: 'unknown' }; }
+      }));
+      setActivity(enriched);
 
-    // Enrich activity with TMDB
-    const enriched = await Promise.all(acts.slice(0, 30).map(async a => {
-      const d = await fetchTmdb(a.tmdb_id);
-      return { ...a, poster_path: d?.poster_path, title: d?.title || d?.name };
-    }));
-    setActivity(enriched);
-
-    // Reputation: likes on reviews
-    const { data: reviewLikes } = await supabase
-      .from('review_likes').select('id').in('review_id', (reviewData || []).map((r: any) => r.id));
-    const totalLikes = (reviewLikes || []).length;
-    const rep = Math.min(5, (totalLikes / Math.max(1, (reviewData || []).length)) * 2.5);
-    setReputation(Math.round(rep * 10) / 10);
+      if ((reviewData || []).length > 0) {
+        const reviewIds = (reviewData || []).map((r: any) => r.id);
+        const { data: reviewLikes } = await supabase.from('review_likes').select('id').in('review_id', reviewIds);
+        const totalLikes = (reviewLikes || []).length;
+        setReputation(Math.round(Math.min(5, (totalLikes / Math.max(1, reviewIds.length)) * 2.5) * 10) / 10);
+      }
+    } catch (e) {
+      console.error('Profile load error:', e);
+    } finally {
+      setPageLoading(false);
+    }
   };
 
   const saveBio = async () => {
@@ -160,7 +172,7 @@ export default function ProfilePage() {
     return date.toLocaleDateString('en-GB', { day: 'numeric', month: 'short', year: 'numeric' });
   };
 
-  if (loading || !profile) return (
+  if (loading || !profile || pageLoading) return (
     <div className="min-h-screen bg-[#070707] flex items-center justify-center">
       <div style={{ fontSize: '11px', color: '#444', letterSpacing: '0.3em' }}>loading...</div>
     </div>
