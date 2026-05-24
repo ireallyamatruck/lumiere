@@ -1,8 +1,7 @@
 'use client';
 
 import { useState, useEffect, useCallback, useRef } from 'react';
-import { Movie, fetchDiscover, fetchGenres } from '@/lib/tmdb';
-import { hueToRange } from '@/lib/colors';
+import { Movie, fetchDiscover, fetchMorePages, fetchGenres } from '@/lib/tmdb';
 import ColorPicker from '@/components/ColorPicker';
 import PosterCard from '@/components/PosterCard';
 import MovieModal from '@/components/MovieModal';
@@ -15,6 +14,7 @@ const SORT_OPTIONS = [
 ];
 
 type ViewMode = 'grid' | 'cosmos';
+type ColorMode = 'poster' | 'cinema';
 
 function hueDist(a: number, b: number) {
   const d = Math.abs(a - b);
@@ -27,22 +27,75 @@ export default function Home() {
   const [genres, setGenres] = useState<Record<number, string>>({});
   const [selected, setSelected] = useState<Movie | null>(null);
   const [loading, setLoading] = useState(true);
-  const [extracting, setExtracting] = useState(false);
   const [extractCount, setExtractCount] = useState(0);
+  const [totalCount, setTotalCount] = useState(0);
+  const [bgLoading, setBgLoading] = useState(false);
   const [mediaType, setMediaType] = useState<'movie' | 'tv'>('movie');
   const [sort, setSort] = useState('popularity.desc');
   const [searchQuery, setSearchQuery] = useState('');
   const [showSearch, setShowSearch] = useState(false);
   const [viewMode, setViewMode] = useState<ViewMode>('grid');
+  const [colorMode, setColorMode] = useState<ColorMode>('poster');
   const [filterActive, setFilterActive] = useState(false);
   const [cosmosHue, setCosmosHue] = useState<number | null>(null);
-
-  // Color picker state
   const [pickerHue, setPickerHue] = useState(210);
   const [pickerSat, setPickerSat] = useState(70);
   const [pickerLit, setPickerLit] = useState(45);
 
   const colorizedRef = useRef<Set<number>>(new Set());
+  const idSetRef = useRef<Set<number>>(new Set());
+  const moviesRef = useRef<Movie[]>([]);
+
+  const colorizeMovies = useCallback(async (movies: Movie[], mode: ColorMode) => {
+    const pending = movies.filter(m => {
+      const alreadyDone = mode === 'poster' ? m.colorHue !== undefined : m.cinemaHue !== undefined;
+      return !alreadyDone && (mode === 'poster' ? m.poster_path : m.backdrop_path);
+    });
+    if (!pending.length) return;
+
+    const BATCH = 20;
+    for (let i = 0; i < pending.length; i += BATCH) {
+      const batch = pending.slice(i, i + BATCH);
+      try {
+        const body = colorMode === 'poster'
+          ? { posterPaths: batch.map(m => m.poster_path!) }
+          : { backdropPaths: batch.map(m => m.backdrop_path!) };
+
+        const res = await fetch('/api/colors', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(body),
+        });
+        const { results } = await res.json();
+
+        batch.forEach(movie => {
+          const key = mode === 'poster' ? movie.poster_path! : movie.backdrop_path!;
+          const data = results[key];
+          if (data) {
+            if (mode === 'poster') {
+              movie.dominantColor = data.dominant;
+              movie.palette = data.palette;
+              movie.colorHue = data.hue;
+              movie.colorSat = data.saturation;
+              movie.colorLit = data.lightness;
+            } else {
+              movie.cinemaColor = data.dominant;
+              movie.cinemaPalette = data.palette;
+              movie.cinemaHue = data.hue;
+              movie.cinemaSat = data.saturation;
+              movie.cinemaLit = data.lightness;
+            }
+          }
+          colorizedRef.current.add(movie.id);
+        });
+
+        setExtractCount(prev => prev + batch.length);
+        setAllMovies(prev => [...prev]);
+      } catch {
+        batch.forEach(m => colorizedRef.current.add(m.id));
+      }
+    }
+  }, [colorMode]);
 
   const load = useCallback(async (type: 'movie' | 'tv', sortBy: string) => {
     setLoading(true);
@@ -50,17 +103,24 @@ export default function Home() {
     setDisplayed([]);
     setFilterActive(false);
     setExtractCount(0);
+    setTotalCount(0);
     colorizedRef.current = new Set();
+    idSetRef.current = new Set();
+    moviesRef.current = [];
+
     try {
       const [results, genreList] = await Promise.all([
-        fetchDiscover(type, sortBy, 5),
+        fetchDiscover(type, sortBy, 50),
         fetchGenres(type),
       ]);
       const genreMap: Record<number, string> = {};
       genreList.forEach(g => { genreMap[g.id] = g.name; });
       setGenres(genreMap);
+      results.forEach(m => idSetRef.current.add(m.id));
+      moviesRef.current = results;
       setAllMovies(results);
       setDisplayed(results);
+      setTotalCount(results.length);
     } catch {
       setAllMovies([]);
       setDisplayed([]);
@@ -70,68 +130,56 @@ export default function Home() {
 
   useEffect(() => { load(mediaType, sort); }, [mediaType, sort, load]);
 
-  const colorizeMovies = useCallback(async (movies: Movie[]) => {
-    const pending = movies.filter(m => !colorizedRef.current.has(m.id) && m.poster_path);
-    if (!pending.length) return;
-    setExtracting(true);
-
-    const BATCH = 20;
-    for (let i = 0; i < pending.length; i += BATCH) {
-      const batch = pending.slice(i, i + BATCH);
-      try {
-        const res = await fetch('/api/colors', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ posterPaths: batch.map(m => m.poster_path!) }),
-        });
-        const { results } = await res.json();
-        batch.forEach(movie => {
-          const data = results[movie.poster_path!];
-          if (data) {
-            movie.dominantColor = data.dominant;
-            movie.palette = data.palette;
-            movie.colorHue = data.hue;
-            movie.colorSat = data.saturation;
-            movie.colorLit = data.lightness;
-          }
-          colorizedRef.current.add(movie.id);
-        });
-        setExtractCount(colorizedRef.current.size);
-        setAllMovies(prev => [...prev]);
-      } catch {
-        batch.forEach(m => colorizedRef.current.add(m.id));
-      }
-    }
-    setExtracting(false);
-  }, []);
-
+  // Colorize initial batch
   useEffect(() => {
-    if (allMovies.length > 0) colorizeMovies(allMovies);
-  }, [allMovies.length, colorizeMovies]);
+    if (allMovies.length > 0 && !loading) {
+      colorizeMovies(allMovies, colorMode);
+    }
+  }, [allMovies.length, loading, colorMode, colorizeMovies]);
+
+  // Background load more pages (51–400)
+  useEffect(() => {
+    if (loading || bgLoading) return;
+    const type = mediaType;
+    const sortBy = sort;
+    setBgLoading(true);
+
+    fetchMorePages(type, sortBy, 51, 400, idSetRef.current, (batch) => {
+      moviesRef.current = [...moviesRef.current, ...batch];
+      setAllMovies(prev => {
+        const next = [...prev, ...batch];
+        setTotalCount(next.length);
+        // Colorize new batch
+        colorizeMovies(batch, colorMode);
+        return next;
+      });
+    }).finally(() => setBgLoading(false));
+  }, [loading]);  // only run once after initial load
 
   const handleGo = useCallback((h: number, s: number, l: number) => {
     setFilterActive(true);
     setCosmosHue(h);
 
-    // Match films whose hue is within 22°, saturation within 30, lightness within 30
+    const isPoster = colorMode === 'poster';
     const filtered = allMovies.filter(m => {
-      if (m.colorHue === undefined) return false;
-      const hd = hueDist(m.colorHue, h);
-      const sd = Math.abs((m.colorSat ?? 50) - s);
-      const ld = Math.abs((m.colorLit ?? 50) - l);
-      return hd < 22 && sd < 35 && ld < 35;
+      const mh = isPoster ? m.colorHue : m.cinemaHue;
+      const ms = isPoster ? m.colorSat : m.cinemaSat;
+      const ml = isPoster ? m.colorLit : m.cinemaLit;
+      if (mh === undefined) return false;
+      return hueDist(mh, h) < 15 && Math.abs((ms ?? 50) - s) < 25 && Math.abs((ml ?? 50) - l) < 40;
     });
 
-    // If too few matches, relax to hue-only
-    if (filtered.length < 5) {
-      const hueOnly = allMovies.filter(m =>
-        m.colorHue !== undefined && hueDist(m.colorHue, h) < 30
-      );
+    // Relax if too few
+    if (filtered.length < 8) {
+      const hueOnly = allMovies.filter(m => {
+        const mh = isPoster ? m.colorHue : m.cinemaHue;
+        return mh !== undefined && hueDist(mh, h) < 25;
+      });
       setDisplayed(hueOnly.length > 0 ? hueOnly : allMovies);
     } else {
       setDisplayed(filtered);
     }
-  }, [allMovies]);
+  }, [allMovies, colorMode]);
 
   const handleClear = () => {
     setDisplayed(allMovies);
@@ -155,38 +203,39 @@ export default function Home() {
 
   const countLabel = loading
     ? 'loading...'
-    : extracting
-    ? `colouring ${extractCount} / ${allMovies.length}`
     : filterActive
-    ? `${displayed.length} matches · ${allMovies.length} total`
-    : `${displayed.length} films`;
+    ? `${displayed.length} matches · ${totalCount} total`
+    : bgLoading
+    ? `${totalCount} films · loading more...`
+    : `${totalCount} films`;
 
   return (
     <main className="min-h-screen bg-[#070707]">
-      <header className="flex items-baseline justify-between px-8 pt-8 pb-0">
-        <div className="flex items-baseline gap-4">
+      <header className="flex items-center justify-between px-8 pt-8 pb-0">
+        <div className="flex items-baseline gap-5">
           <h1
-            className="font-display text-[28px] font-light tracking-[0.1em] text-[#e2d9c8]"
-            style={{ fontFamily: 'var(--font-display)' }}
+            className="font-display font-light tracking-[0.1em] text-[#e2d9c8]"
+            style={{ fontFamily: 'var(--font-display)', fontSize: '38px' }}
           >
-            lumi<span className="italic text-neutral-600">ère</span>
+            lumi<span className="italic text-neutral-500">ère</span>
           </h1>
-          <span className="text-[9px] tracking-[0.25em] text-neutral-700 uppercase hidden sm:block">
+          <span className="text-[11px] tracking-[0.25em] text-neutral-700 uppercase hidden sm:block">
             cinema by colour
           </span>
         </div>
+
         <div className="flex items-center gap-5">
           {filterActive && (
             <button
               onClick={handleClear}
-              className="text-[9px] tracking-[0.2em] uppercase text-neutral-700 hover:text-[#e2d9c8] transition-colors"
+              className="text-[11px] tracking-[0.2em] uppercase text-neutral-700 hover:text-[#e2d9c8] transition-colors"
             >
               clear
             </button>
           )}
           <button
             onClick={() => setShowSearch(s => !s)}
-            className="text-[9px] tracking-[0.2em] uppercase text-neutral-600 hover:text-[#e2d9c8] transition-colors"
+            className="text-[11px] tracking-[0.2em] uppercase text-neutral-600 hover:text-[#e2d9c8] transition-colors"
           >
             {showSearch ? 'cancel' : 'search'}
           </button>
@@ -195,7 +244,7 @@ export default function Home() {
               <button
                 key={v}
                 onClick={() => setViewMode(v)}
-                className="text-[9px] tracking-[0.15em] uppercase px-3 py-1 transition-all duration-200"
+                className="text-[10px] tracking-[0.15em] uppercase px-3 py-[5px] transition-all duration-200"
                 style={{
                   background: viewMode === v ? '#1a1a1a' : 'transparent',
                   color: viewMode === v ? '#e2d9c8' : '#444',
@@ -209,16 +258,41 @@ export default function Home() {
       </header>
 
       {showSearch && (
-        <form onSubmit={handleSearch} className="px-8 pt-4">
+        <form onSubmit={handleSearch} className="px-8 pt-5">
           <input
             autoFocus
             value={searchQuery}
             onChange={e => setSearchQuery(e.target.value)}
             placeholder="search films, series..."
-            className="w-full bg-transparent border-b border-[#222] text-[#e2d9c8] font-mono text-[11px] tracking-wider py-2 outline-none placeholder-neutral-700 focus:border-neutral-600 transition-colors"
+            className="w-full bg-transparent border-b border-[#222] text-[#e2d9c8] font-mono text-[12px] tracking-wider py-2 outline-none placeholder-neutral-700 focus:border-neutral-600 transition-colors"
           />
         </form>
       )}
+
+      {/* Color mode toggle + picker */}
+      <div className="px-8 pt-6">
+        <div className="flex items-center gap-6 mb-4">
+          <div className="text-[11px] tracking-[0.25em] text-neutral-600 uppercase">colour source</div>
+          <div className="flex items-center gap-1 border border-[#1e1e1e] rounded-sm overflow-hidden">
+            {(['poster', 'cinema'] as ColorMode[]).map(m => (
+              <button
+                key={m}
+                onClick={() => setColorMode(m)}
+                className="text-[10px] tracking-[0.15em] uppercase px-3 py-[5px] transition-all duration-200"
+                style={{
+                  background: colorMode === m ? '#1a1a1a' : 'transparent',
+                  color: colorMode === m ? '#e2d9c8' : '#444',
+                }}
+              >
+                {m === 'poster' ? 'poster art' : 'film scene'}
+              </button>
+            ))}
+          </div>
+          <span className="text-[10px] text-neutral-700 tracking-wide">
+            {colorMode === 'poster' ? 'colour from poster artwork' : 'colour from actual film scenes'}
+          </span>
+        </div>
+      </div>
 
       <ColorPicker
         hue={pickerHue}
@@ -228,13 +302,13 @@ export default function Home() {
         onGo={handleGo}
       />
 
-      <div className="flex items-center justify-between px-8 py-4 border-b border-[#111] mt-4">
-        <div className="text-[10px] text-neutral-600 tracking-widest">{countLabel}</div>
+      <div className="flex items-center justify-between px-8 py-4 border-b border-[#111] mt-5">
+        <div className="text-[11px] text-neutral-600 tracking-widest">{countLabel}</div>
         <div className="flex items-center gap-3">
           <select
             value={mediaType}
             onChange={e => setMediaType(e.target.value as 'movie' | 'tv')}
-            className="bg-[#070707] border border-[#1e1e1e] text-neutral-500 font-mono text-[9px] tracking-widest uppercase py-1 px-3 rounded-sm outline-none cursor-pointer hover:border-[#333] transition-colors appearance-none"
+            className="bg-[#070707] border border-[#1e1e1e] text-neutral-500 font-mono text-[10px] tracking-widest uppercase py-[5px] px-3 rounded-sm outline-none cursor-pointer hover:border-[#333] transition-colors appearance-none"
           >
             <option value="movie">films</option>
             <option value="tv">series</option>
@@ -242,7 +316,7 @@ export default function Home() {
           <select
             value={sort}
             onChange={e => setSort(e.target.value)}
-            className="bg-[#070707] border border-[#1e1e1e] text-neutral-500 font-mono text-[9px] tracking-widest uppercase py-1 px-3 rounded-sm outline-none cursor-pointer hover:border-[#333] transition-colors appearance-none"
+            className="bg-[#070707] border border-[#1e1e1e] text-neutral-500 font-mono text-[10px] tracking-widest uppercase py-[5px] px-3 rounded-sm outline-none cursor-pointer hover:border-[#333] transition-colors appearance-none"
           >
             {SORT_OPTIONS.map(o => (
               <option key={o.value} value={o.value}>{o.label}</option>
@@ -263,7 +337,7 @@ export default function Home() {
             </div>
           ) : displayed.length === 0 ? (
             <div className="flex flex-col items-center justify-center py-24">
-              <div className="text-[10px] tracking-[0.3em] text-neutral-700 uppercase">no results found</div>
+              <div className="text-[12px] tracking-[0.3em] text-neutral-700 uppercase">no results found</div>
             </div>
           ) : (
             <div className="grid grid-cols-3 sm:grid-cols-4 md:grid-cols-5 lg:grid-cols-6 xl:grid-cols-7 gap-3">

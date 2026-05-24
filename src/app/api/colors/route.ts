@@ -1,7 +1,14 @@
 import { NextRequest, NextResponse } from 'next/server';
 
-// In-memory cache — persists across requests in the same serverless instance
-const cache = new Map<string, { dominant: string; palette: string[]; hue: number; saturation: number; lightness: number }>();
+const cache = new Map<string, ColorResult>();
+
+interface ColorResult {
+  dominant: string;
+  palette: string[];
+  hue: number;
+  saturation: number;
+  lightness: number;
+}
 
 function rgbToHsl(r: number, g: number, b: number): [number, number, number] {
   r /= 255; g /= 255; b /= 255;
@@ -20,91 +27,98 @@ function rgbToHsl(r: number, g: number, b: number): [number, number, number] {
   return [Math.round(h * 360), Math.round(s * 100), Math.round(l * 100)];
 }
 
-function vibrancyScore(r: number, g: number, b: number): number {
+function vibrancyScore(r: number, g: number, b: number, population: number): number {
   const [, s, l] = rgbToHsl(r, g, b);
-  if (s < 15 || l < 10 || l > 90) return 0;
-  const lightnessScore = 1 - Math.abs((l - 50) / 50);
-  return (s / 100) * lightnessScore;
+  if (s < 20 || l < 8 || l > 92) return 0;
+  // Strongly prefer mid-lightness saturated colors
+  const lightnessScore = 1 - Math.abs((l - 48) / 48);
+  // Use population² to strongly weight common colors
+  return (s / 100) * lightnessScore * (population * population);
 }
 
-async function extractFromUrl(imageUrl: string) {
-  // Fetch the image as a buffer
-  const res = await fetch(imageUrl);
-  if (!res.ok) return null;
-  const buffer = await res.arrayBuffer();
+async function extractFromPath(imagePath: string, baseUrl: string): Promise<ColorResult | null> {
+  const cacheKey = imagePath;
+  if (cache.has(cacheKey)) return cache.get(cacheKey)!;
 
-  // Use Vibrant via node-vibrant (works server-side)
-  const Vibrant = (await import('node-vibrant')).default;
-  const palette = await Vibrant.from(Buffer.from(buffer)).getPalette();
+  try {
+    const url = `${baseUrl}${imagePath}`;
+    const res = await fetch(url);
+    if (!res.ok) return null;
+    const buffer = await res.arrayBuffer();
 
-  const swatches = [
-    palette.Vibrant,
-    palette.LightVibrant,
-    palette.DarkVibrant,
-    palette.Muted,
-    palette.LightMuted,
-    palette.DarkMuted,
-  ]
-    .filter(Boolean)
-    .map(s => ({
-      hex: s!.hex,
-      rgb: s!.rgb,
-      population: s!.population,
-      score: vibrancyScore(s!.rgb[0], s!.rgb[1], s!.rgb[2]) * Math.log1p(s!.population),
-    }))
-    .sort((a, b) => b.score - a.score);
+    const Vibrant = (await import('node-vibrant')).default;
+    const palette = await Vibrant.from(Buffer.from(buffer)).quality(1).getPalette();
 
-  if (!swatches.length) return null;
+    const swatches = [
+      palette.Vibrant,
+      palette.LightVibrant,
+      palette.DarkVibrant,
+      palette.Muted,
+      palette.LightMuted,
+      palette.DarkMuted,
+    ]
+      .filter(Boolean)
+      .map(s => ({
+        hex: s!.hex,
+        rgb: s!.rgb,
+        population: s!.population,
+        score: vibrancyScore(s!.rgb[0], s!.rgb[1], s!.rgb[2], s!.population),
+      }))
+      .filter(s => s.score > 0)
+      .sort((a, b) => b.score - a.score);
 
-  const best = swatches[0];
-  const [h, sat, l] = rgbToHsl(best.rgb[0], best.rgb[1], best.rgb[2]);
+    if (!swatches.length) return null;
 
-  return {
-    dominant: best.hex,
-    palette: swatches.map(s => s.hex),
-    hue: h,
-    saturation: sat,
-    lightness: l,
-  };
+    const best = swatches[0];
+    const [h, sat, l] = rgbToHsl(best.rgb[0], best.rgb[1], best.rgb[2]);
+
+    // Strict: reject if best swatch is still too grey or extreme
+    if (sat < 20 || l < 10 || l > 90) return null;
+
+    const result: ColorResult = {
+      dominant: best.hex,
+      palette: swatches.slice(0, 5).map(s => s.hex),
+      hue: h,
+      saturation: sat,
+      lightness: l,
+    };
+
+    cache.set(cacheKey, result);
+    return result;
+  } catch {
+    return null;
+  }
 }
 
 export async function POST(req: NextRequest) {
   try {
-    const { posterPaths } = await req.json() as { posterPaths: string[] };
-    if (!posterPaths?.length) return NextResponse.json({ results: {} });
+    const body = await req.json() as {
+      posterPaths?: string[];
+      backdropPaths?: string[];
+    };
 
-    const results: Record<string, ReturnType<typeof extractFromUrl> extends Promise<infer T> ? T : never> = {};
-    const toFetch = posterPaths.filter(p => !cache.has(p));
+    const results: Record<string, ColorResult | null> = {};
+    const POSTER_BASE = 'https://image.tmdb.org/t/p/w185';
+    const BACKDROP_BASE = 'https://image.tmdb.org/t/p/w300';
 
-    // Process in parallel batches of 8
+    const allPaths = [
+      ...(body.posterPaths || []).map(p => ({ path: p, base: POSTER_BASE })),
+      ...(body.backdropPaths || []).map(p => ({ path: p, base: BACKDROP_BASE })),
+    ];
+
     const BATCH = 8;
-    for (let i = 0; i < toFetch.length; i += BATCH) {
-      const batch = toFetch.slice(i, i + BATCH);
+    for (let i = 0; i < allPaths.length; i += BATCH) {
+      const batch = allPaths.slice(i, i + BATCH);
       await Promise.all(
-        batch.map(async (path) => {
-          try {
-            const url = `https://image.tmdb.org/t/p/w185${path}`;
-            const result = await extractFromUrl(url);
-            if (result) {
-              cache.set(path, result);
-              results[path] = result;
-            }
-          } catch {
-            // skip failed extractions
-          }
+        batch.map(async ({ path, base }) => {
+          const result = await extractFromPath(path, base);
+          results[path] = result;
         })
       );
     }
 
-    // Include cached results too
-    posterPaths.forEach(p => {
-      if (cache.has(p) && !results[p]) {
-        results[p] = cache.get(p)!;
-      }
-    });
-
     return NextResponse.json({ results });
-  } catch (e) {
+  } catch {
     return NextResponse.json({ error: 'extraction failed' }, { status: 500 });
   }
 }

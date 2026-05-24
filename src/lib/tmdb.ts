@@ -20,6 +20,12 @@ export interface Movie {
   colorHue?: number;
   colorSat?: number;
   colorLit?: number;
+  // Cinema theme (from backdrop)
+  cinemaColor?: string;
+  cinemaPalette?: string[];
+  cinemaHue?: number;
+  cinemaSat?: number;
+  cinemaLit?: number;
 }
 
 export interface Genre {
@@ -28,28 +34,58 @@ export interface Genre {
 }
 
 async function fetchPage(type: 'movie' | 'tv', sort: string, page: number): Promise<Movie[]> {
-  const url = `${TMDB_BASE}/discover/${type}?api_key=${API_KEY}&sort_by=${sort}&vote_count.gte=100&page=${page}&include_adult=false`;
-  const res = await fetch(url);
-  const data = await res.json();
-  return (data.results || []).filter((m: Movie) => m.poster_path);
+  const url = `${TMDB_BASE}/discover/${type}?api_key=${API_KEY}&sort_by=${sort}&vote_count.gte=50&page=${page}&include_adult=false`;
+  try {
+    const res = await fetch(url);
+    if (!res.ok) return [];
+    const data = await res.json();
+    return (data.results || []).filter((m: Movie) => m.poster_path);
+  } catch {
+    return [];
+  }
 }
 
+// Fetch initial batch fast (50 pages = ~1000 films)
 export async function fetchDiscover(
   type: 'movie' | 'tv',
   sort: string,
-  pages = 5
+  pages = 50
 ): Promise<Movie[]> {
-  // Fetch all pages in parallel
-  const pageNumbers = Array.from({ length: pages }, (_, i) => i + 1);
-  const results = await Promise.all(pageNumbers.map(p => fetchPage(type, sort, p)));
-  const all = results.flat();
-  // Deduplicate by id
+  const CHUNK = 10; // 10 parallel requests at a time
+  const all: Movie[] = [];
   const seen = new Set<number>();
-  return all.filter(m => {
-    if (seen.has(m.id)) return false;
-    seen.add(m.id);
-    return true;
-  });
+
+  for (let start = 1; start <= pages; start += CHUNK) {
+    const end = Math.min(start + CHUNK - 1, pages);
+    const pageNums = Array.from({ length: end - start + 1 }, (_, i) => start + i);
+    const results = await Promise.all(pageNums.map(p => fetchPage(type, sort, p)));
+    results.flat().forEach(m => {
+      if (!seen.has(m.id)) { seen.add(m.id); all.push(m); }
+    });
+  }
+  return all;
+}
+
+// Background loader — calls onBatch each chunk so UI updates progressively
+export async function fetchMorePages(
+  type: 'movie' | 'tv',
+  sort: string,
+  fromPage: number,
+  toPage: number,
+  existingIds: Set<number>,
+  onBatch: (movies: Movie[]) => void
+): Promise<void> {
+  const CHUNK = 10;
+  for (let start = fromPage; start <= toPage; start += CHUNK) {
+    const end = Math.min(start + CHUNK - 1, toPage);
+    const pageNums = Array.from({ length: end - start + 1 }, (_, i) => start + i);
+    const results = await Promise.all(pageNums.map(p => fetchPage(type, sort, p)));
+    const batch = results.flat().filter(m => !existingIds.has(m.id));
+    batch.forEach(m => existingIds.add(m.id));
+    if (batch.length > 0) onBatch(batch);
+    // Small pause to avoid rate limiting
+    await new Promise(r => setTimeout(r, 250));
+  }
 }
 
 export async function fetchGenres(type: 'movie' | 'tv'): Promise<Genre[]> {
@@ -75,6 +111,10 @@ export async function searchMovies(query: string): Promise<Movie[]> {
 }
 
 export function posterUrl(path: string, size: 'w185' | 'w342' | 'w500' | 'original' = 'w342') {
+  return `${TMDB_IMG}/${size}${path}`;
+}
+
+export function backdropUrl(path: string, size: 'w300' | 'w780' | 'w1280' = 'w300') {
   return `${TMDB_IMG}/${size}${path}`;
 }
 
