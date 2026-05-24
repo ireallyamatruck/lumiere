@@ -17,6 +17,9 @@ export interface Movie {
   media_type?: string;
   dominantColor?: string;
   palette?: string[];
+  colorHue?: number;
+  colorSat?: number;
+  colorLit?: number;
 }
 
 export interface Genre {
@@ -24,15 +27,29 @@ export interface Genre {
   name: string;
 }
 
+async function fetchPage(type: 'movie' | 'tv', sort: string, page: number): Promise<Movie[]> {
+  const url = `${TMDB_BASE}/discover/${type}?api_key=${API_KEY}&sort_by=${sort}&vote_count.gte=100&page=${page}&include_adult=false`;
+  const res = await fetch(url);
+  const data = await res.json();
+  return (data.results || []).filter((m: Movie) => m.poster_path);
+}
+
 export async function fetchDiscover(
   type: 'movie' | 'tv',
   sort: string,
-  page = 1
+  pages = 5
 ): Promise<Movie[]> {
-  const url = `${TMDB_BASE}/discover/${type}?api_key=${API_KEY}&sort_by=${sort}&vote_count.gte=100&page=${page}&include_adult=false`;
-  const res = await fetch(url, { next: { revalidate: 3600 } });
-  const data = await res.json();
-  return (data.results || []).filter((m: Movie) => m.poster_path);
+  // Fetch all pages in parallel
+  const pageNumbers = Array.from({ length: pages }, (_, i) => i + 1);
+  const results = await Promise.all(pageNumbers.map(p => fetchPage(type, sort, p)));
+  const all = results.flat();
+  // Deduplicate by id
+  const seen = new Set<number>();
+  return all.filter(m => {
+    if (seen.has(m.id)) return false;
+    seen.add(m.id);
+    return true;
+  });
 }
 
 export async function fetchGenres(type: 'movie' | 'tv'): Promise<Genre[]> {

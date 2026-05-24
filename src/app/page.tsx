@@ -2,16 +2,19 @@
 
 import { useState, useEffect, useCallback, useRef } from 'react';
 import { Movie, fetchDiscover, fetchGenres } from '@/lib/tmdb';
-import { extractColors, hueToRange } from '@/lib/colors';
+import { hueToRange, HUE_RANGES } from '@/lib/colors';
 import SpectrumBar from '@/components/SpectrumBar';
 import PosterCard from '@/components/PosterCard';
 import MovieModal from '@/components/MovieModal';
+import CosmosView from '@/components/CosmosView';
 
 const SORT_OPTIONS = [
   { value: 'popularity.desc', label: 'popular' },
   { value: 'vote_average.desc', label: 'top rated' },
   { value: 'release_date.desc', label: 'recent' },
 ];
+
+type ViewMode = 'grid' | 'cosmos';
 
 export default function Home() {
   const [allMovies, setAllMovies] = useState<Movie[]>([]);
@@ -20,25 +23,27 @@ export default function Home() {
   const [selected, setSelected] = useState<Movie | null>(null);
   const [loading, setLoading] = useState(true);
   const [extracting, setExtracting] = useState(false);
+  const [extractCount, setExtractCount] = useState(0);
   const [mediaType, setMediaType] = useState<'movie' | 'tv'>('movie');
   const [sort, setSort] = useState('popularity.desc');
   const [searchQuery, setSearchQuery] = useState('');
   const [showSearch, setShowSearch] = useState(false);
   const [activeHue, setActiveHue] = useState(7);
   const [filterActive, setFilterActive] = useState(false);
+  const [viewMode, setViewMode] = useState<ViewMode>('grid');
+  const [cosmosHue, setCosmosHue] = useState<number | null>(null);
   const colorizedRef = useRef<Set<number>>(new Set());
-  const hueMapRef = useRef<Map<number, number>>(new Map());
 
   const load = useCallback(async (type: 'movie' | 'tv', sortBy: string) => {
     setLoading(true);
     setAllMovies([]);
     setDisplayed([]);
     setFilterActive(false);
+    setExtractCount(0);
     colorizedRef.current = new Set();
-    hueMapRef.current = new Map();
     try {
       const [results, genreList] = await Promise.all([
-        fetchDiscover(type, sortBy, 1),
+        fetchDiscover(type, sortBy, 5),
         fetchGenres(type),
       ]);
       const genreMap: Record<number, string> = {};
@@ -55,24 +60,44 @@ export default function Home() {
 
   useEffect(() => { load(mediaType, sort); }, [mediaType, sort, load]);
 
+  // Server-side color extraction in batches
   const colorizeMovies = useCallback(async (movies: Movie[]) => {
     const pending = movies.filter(m => !colorizedRef.current.has(m.id) && m.poster_path);
     if (!pending.length) return;
     setExtracting(true);
-    for (let i = 0; i < pending.length; i++) {
-      const movie = pending[i];
-      if (colorizedRef.current.has(movie.id)) continue;
-      const url = `https://image.tmdb.org/t/p/w185${movie.poster_path}`;
-      const result = await extractColors(url);
-      if (result) {
-        movie.dominantColor = result.dominant;
-        movie.palette = result.palette;
-        hueMapRef.current.set(movie.id, hueToRange(result.hue));
+
+    const BATCH = 20;
+    for (let i = 0; i < pending.length; i += BATCH) {
+      const batch = pending.slice(i, i + BATCH);
+      const posterPaths = batch.map(m => m.poster_path!);
+
+      try {
+        const res = await fetch('/api/colors', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ posterPaths }),
+        });
+        const { results } = await res.json();
+
+        batch.forEach(movie => {
+          const data = results[movie.poster_path!];
+          if (data) {
+            movie.dominantColor = data.dominant;
+            movie.palette = data.palette;
+            movie.colorHue = data.hue;
+            movie.colorSat = data.saturation;
+            movie.colorLit = data.lightness;
+          }
+          colorizedRef.current.add(movie.id);
+        });
+
+        setExtractCount(colorizedRef.current.size);
+        setAllMovies(prev => [...prev]);
+      } catch {
+        batch.forEach(m => colorizedRef.current.add(m.id));
       }
-      colorizedRef.current.add(movie.id);
-      if (i % 4 === 3) setAllMovies(prev => [...prev]);
     }
-    setAllMovies(prev => [...prev]);
+
     setExtracting(false);
   }, []);
 
@@ -81,14 +106,22 @@ export default function Home() {
   }, [allMovies.length, colorizeMovies]);
 
   const handleGo = useCallback((hueIndex: number) => {
+    const range = HUE_RANGES[hueIndex];
     setFilterActive(true);
-    const filtered = allMovies.filter(m => hueMapRef.current.get(m.id) === hueIndex);
+    setCosmosHue(range.min + (range.max - range.min) / 2);
+
+    const filtered = allMovies.filter(m => {
+      if (m.colorHue === undefined) return false;
+      const idx = hueToRange(m.colorHue);
+      return idx === hueIndex;
+    });
     setDisplayed(filtered.length > 0 ? filtered : allMovies);
   }, [allMovies]);
 
-  const handleHueSelect = (i: number) => {
-    setActiveHue(i);
-    if (filterActive) setFilterActive(false);
+  const handleClear = () => {
+    setDisplayed(allMovies);
+    setFilterActive(false);
+    setCosmosHue(null);
   };
 
   const handleSearch = async (e: React.FormEvent) => {
@@ -96,7 +129,6 @@ export default function Home() {
     if (!searchQuery.trim()) return;
     setLoading(true);
     colorizedRef.current = new Set();
-    hueMapRef.current = new Map();
     setFilterActive(false);
     const { searchMovies } = await import('@/lib/tmdb');
     const results = await searchMovies(searchQuery);
@@ -109,9 +141,9 @@ export default function Home() {
   const countLabel = loading
     ? 'loading...'
     : extracting
-    ? `analysing ${colorizedRef.current.size} / ${allMovies.length}`
+    ? `colouring ${extractCount} / ${allMovies.length}`
     : filterActive
-    ? `${displayed.length} in hue`
+    ? `${displayed.length} in hue · ${allMovies.length} total`
     : `${displayed.length} films`;
 
   return (
@@ -128,10 +160,10 @@ export default function Home() {
             cinema by colour
           </span>
         </div>
-        <div className="flex items-center gap-4">
+        <div className="flex items-center gap-5">
           {filterActive && (
             <button
-              onClick={() => { setDisplayed(allMovies); setFilterActive(false); }}
+              onClick={handleClear}
               className="text-[9px] tracking-[0.2em] uppercase text-neutral-700 hover:text-[#e2d9c8] transition-colors"
             >
               clear
@@ -143,6 +175,22 @@ export default function Home() {
           >
             {showSearch ? 'cancel' : 'search'}
           </button>
+          {/* View toggle */}
+          <div className="flex items-center gap-1 border border-[#1e1e1e] rounded-sm overflow-hidden">
+            {(['grid', 'cosmos'] as ViewMode[]).map(v => (
+              <button
+                key={v}
+                onClick={() => setViewMode(v)}
+                className="text-[9px] tracking-[0.15em] uppercase px-3 py-1 transition-all duration-200"
+                style={{
+                  background: viewMode === v ? '#1a1a1a' : 'transparent',
+                  color: viewMode === v ? '#e2d9c8' : '#444',
+                }}
+              >
+                {v}
+              </button>
+            ))}
+          </div>
         </div>
       </header>
 
@@ -158,7 +206,7 @@ export default function Home() {
         </form>
       )}
 
-      <SpectrumBar activeIndex={activeHue} onSelect={handleHueSelect} onGo={handleGo} />
+      <SpectrumBar activeIndex={activeHue} onSelect={setActiveHue} onGo={handleGo} />
 
       <div className="flex items-center justify-between px-8 py-4 border-b border-[#111] mt-4">
         <div className="text-[10px] text-neutral-600 tracking-widest">{countLabel}</div>
@@ -183,25 +231,33 @@ export default function Home() {
         </div>
       </div>
 
-      <div className="px-8 py-6">
-        {loading ? (
-          <div className="grid grid-cols-3 sm:grid-cols-4 md:grid-cols-5 lg:grid-cols-6 xl:grid-cols-7 gap-3">
-            {Array.from({ length: 14 }).map((_, i) => (
-              <div key={i} className="skeleton rounded-sm" style={{ aspectRatio: '2/3', animationDelay: `${i * 60}ms` }} />
-            ))}
-          </div>
-        ) : displayed.length === 0 ? (
-          <div className="flex flex-col items-center justify-center py-24 text-center">
-            <div className="text-[10px] tracking-[0.3em] text-neutral-700 uppercase">no results found</div>
-          </div>
-        ) : (
-          <div className="grid grid-cols-3 sm:grid-cols-4 md:grid-cols-5 lg:grid-cols-6 xl:grid-cols-7 gap-3">
-            {displayed.map((movie, i) => (
-              <PosterCard key={movie.id} movie={movie} index={i} onClick={setSelected} />
-            ))}
-          </div>
-        )}
-      </div>
+      {viewMode === 'cosmos' ? (
+        <CosmosView
+          movies={allMovies}
+          onSelect={setSelected}
+          activeHue={cosmosHue}
+        />
+      ) : (
+        <div className="px-8 py-6">
+          {loading ? (
+            <div className="grid grid-cols-3 sm:grid-cols-4 md:grid-cols-5 lg:grid-cols-6 xl:grid-cols-7 gap-3">
+              {Array.from({ length: 20 }).map((_, i) => (
+                <div key={i} className="skeleton rounded-sm" style={{ aspectRatio: '2/3', animationDelay: `${i * 40}ms` }} />
+              ))}
+            </div>
+          ) : displayed.length === 0 ? (
+            <div className="flex flex-col items-center justify-center py-24">
+              <div className="text-[10px] tracking-[0.3em] text-neutral-700 uppercase">no results found</div>
+            </div>
+          ) : (
+            <div className="grid grid-cols-3 sm:grid-cols-4 md:grid-cols-5 lg:grid-cols-6 xl:grid-cols-7 gap-3">
+              {displayed.map((movie, i) => (
+                <PosterCard key={movie.id} movie={movie} index={i} onClick={setSelected} />
+              ))}
+            </div>
+          )}
+        </div>
+      )}
 
       <MovieModal movie={selected} genres={genres} onClose={() => setSelected(null)} />
     </main>
