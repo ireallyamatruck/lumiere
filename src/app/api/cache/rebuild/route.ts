@@ -8,7 +8,7 @@ export const maxDuration = 60;
 //       POST /api/cache/rebuild?secret=YOUR_SECRET&type=tv
 // Or both at once (takes longer): POST /api/cache/rebuild?secret=YOUR_SECRET
 
-export async function POST(req: NextRequest) {
+export async function GET(req: NextRequest) {
   const secret = req.nextUrl.searchParams.get('secret');
   if (!process.env.CACHE_REBUILD_SECRET || secret !== process.env.CACHE_REBUILD_SECRET) {
     return NextResponse.json({ error: 'unauthorized' }, { status: 401 });
