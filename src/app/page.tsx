@@ -195,6 +195,16 @@ export default function Home() {
     });
   };
 
+  const [showDiscovery, setShowDiscovery] = useState(false);
+  useEffect(() => {
+    if (!sessionStorage.getItem('lumiere_mode')) setShowDiscovery(true);
+  }, []);
+  const pickMode = (mode: 'discover' | 'browse') => {
+    sessionStorage.setItem('lumiere_mode', mode);
+    setShowDiscovery(false);
+    if (mode === 'browse') setFilmsRevealed(true);
+  };
+
   const countLabel = loading ? 'loading...'
     : filterActive ? `${displayed.length} matches · ${totalCount} total`
     : bgLoading ? `${totalCount} films · loading more...`
@@ -202,6 +212,37 @@ export default function Home() {
 
   return (
     <main className="min-h-screen bg-[#070707]">
+      {showDiscovery && (
+        <div style={{ position: 'fixed', inset: 0, background: '#070707', zIndex: 200, display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', gap: 0 }}>
+          <div style={{ fontFamily: 'var(--font-display)', fontSize: '48px', fontWeight: 300, color: '#f0ebe0', letterSpacing: '0.05em', marginBottom: '12px' }}>
+            lumi<span style={{ fontStyle: 'italic', color: '#444' }}>ère</span>
+          </div>
+          <div style={{ fontSize: '11px', color: '#2e2e2e', letterSpacing: '0.35em', textTransform: 'uppercase', marginBottom: '64px' }}>
+            cinema by colour
+          </div>
+          <div style={{ fontSize: '13px', color: '#555', letterSpacing: '0.2em', marginBottom: '36px', textAlign: 'center' }}>
+            how do you want to experience cinema tonight?
+          </div>
+          <div style={{ display: 'flex', gap: '16px' }}>
+            <button
+              onClick={() => pickMode('discover')}
+              style={{ padding: '12px 28px', border: '1px solid #2a2a2a', background: 'transparent', color: '#e2d9c8', fontSize: '11px', letterSpacing: '0.25em', textTransform: 'uppercase', cursor: 'pointer', borderRadius: '2px', transition: 'all 0.2s' }}
+              onMouseEnter={e => { e.currentTarget.style.borderColor = '#888'; e.currentTarget.style.background = '#0f0f0f'; }}
+              onMouseLeave={e => { e.currentTarget.style.borderColor = '#2a2a2a'; e.currentTarget.style.background = 'transparent'; }}
+            >
+              discover by colour
+            </button>
+            <button
+              onClick={() => pickMode('browse')}
+              style={{ padding: '12px 28px', border: '1px solid #1a1a1a', background: 'transparent', color: '#555', fontSize: '11px', letterSpacing: '0.25em', textTransform: 'uppercase', cursor: 'pointer', borderRadius: '2px', transition: 'all 0.2s' }}
+              onMouseEnter={e => { e.currentTarget.style.borderColor = '#444'; e.currentTarget.style.color = '#aaa'; }}
+              onMouseLeave={e => { e.currentTarget.style.borderColor = '#1a1a1a'; e.currentTarget.style.color = '#555'; }}
+            >
+              just browse
+            </button>
+          </div>
+        </div>
+      )}
       {/* Header */}
       <header className="flex items-center justify-between px-8 pt-8 pb-0">
         <div className="flex items-baseline gap-5">
