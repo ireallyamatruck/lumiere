@@ -154,6 +154,28 @@ export default function Home() {
     setExtractCount(0); setTotalCount(0);
     colorizedRef.current = new Set(); idSetRef.current = new Set();
     try {
+      // Try Supabase cache first — instant when warm
+      const cacheRes = await fetch(`/api/movies?type=${type}`);
+      if (cacheRes.ok) {
+        const { movies: cached } = await cacheRes.json();
+        if (cached && cached.length > 100) {
+          const genreList = await fetchGenres(type);
+          const genreMap: Record<number, string> = {};
+          genreList.forEach((g: any) => { genreMap[g.id] = g.name; });
+          setGenres(genreMap);
+          cached.forEach((m: Movie) => idSetRef.current.add(m.id));
+          setAllMovies(cached); setDisplayed(cached); setTotalCount(cached.length);
+          setLoading(false);
+          // Only colorize movies that don't have cached colours yet
+          const needsColor = cached.filter((m: Movie) => m.dominantColor === undefined);
+          if (needsColor.length > 0) colorizeMovies(needsColor, colorMode);
+          return; // skip fetchMorePages — cache already has all ~4000 movies
+        }
+      }
+    } catch { /* fall through to TMDB */ }
+
+    // Fallback: fetch directly from TMDB
+    try {
       const [results, genreList] = await Promise.all([fetchDiscover(type, sortBy, 50), fetchGenres(type)]);
       const genreMap: Record<number, string> = {};
       genreList.forEach(g => { genreMap[g.id] = g.name; });
@@ -162,7 +184,7 @@ export default function Home() {
       setAllMovies(results); setDisplayed(results); setTotalCount(results.length);
     } catch { setAllMovies([]); setDisplayed([]); }
     setLoading(false);
-  }, []);
+  }, [colorMode]);
 
   useEffect(() => { load(mediaType, sort); }, [mediaType, sort, load]);
 

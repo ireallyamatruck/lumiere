@@ -1,0 +1,12 @@
+{
+  "crons": [
+    {
+      "path": "/api/cache/rebuild?secret=REPLACE_WITH_YOUR_SECRET&type=movie",
+      "schedule": "0 3 * * *"
+    },
+    {
+      "path": "/api/cache/rebuild?secret=REPLACE_WITH_YOUR_SECRET&type=tv",
+      "schedule": "30 3 * * *"
+    }
+  ]
+}

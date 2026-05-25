@@ -1,6 +1,8 @@
 import { NextRequest, NextResponse } from 'next/server';
+import { supabaseAdmin } from '@/lib/supabase-admin';
 
-const cache = new Map<string, ColorResult>();
+// In-memory cache: fast dedup within the same server instance lifetime
+const memCache = new Map<string, ColorResult>();
 
 interface ColorResult {
   dominant: string;
@@ -30,19 +32,37 @@ function rgbToHsl(r: number, g: number, b: number): [number, number, number] {
 function vibrancyScore(r: number, g: number, b: number, population: number): number {
   const [, s, l] = rgbToHsl(r, g, b);
   if (s < 20 || l < 8 || l > 92) return 0;
-  // Strongly prefer mid-lightness saturated colors
   const lightnessScore = 1 - Math.abs((l - 48) / 48);
-  // Use population² to strongly weight common colors
   return (s / 100) * lightnessScore * (population * population);
 }
 
 async function extractFromPath(imagePath: string, baseUrl: string): Promise<ColorResult | null> {
-  const cacheKey = imagePath;
-  if (cache.has(cacheKey)) return cache.get(cacheKey)!;
+  // 1. In-memory hit
+  if (memCache.has(imagePath)) return memCache.get(imagePath)!;
 
+  // 2. Supabase persistent cache hit
   try {
-    const url = `${baseUrl}${imagePath}`;
-    const res = await fetch(url);
+    const { data } = await supabaseAdmin
+      .from('color_cache')
+      .select('dominant,palette,hue,saturation,lightness')
+      .eq('path', imagePath)
+      .single();
+    if (data) {
+      const result: ColorResult = {
+        dominant: data.dominant,
+        palette: data.palette,
+        hue: data.hue,
+        saturation: data.saturation,
+        lightness: data.lightness,
+      };
+      memCache.set(imagePath, result);
+      return result;
+    }
+  } catch { /* miss, continue to extraction */ }
+
+  // 3. Extract from image
+  try {
+    const res = await fetch(`${baseUrl}${imagePath}`);
     if (!res.ok) return null;
     const buffer = await res.arrayBuffer();
 
@@ -50,18 +70,12 @@ async function extractFromPath(imagePath: string, baseUrl: string): Promise<Colo
     const palette = await Vibrant.from(Buffer.from(buffer)).quality(1).getPalette();
 
     const swatches = [
-      palette.Vibrant,
-      palette.LightVibrant,
-      palette.DarkVibrant,
-      palette.Muted,
-      palette.LightMuted,
-      palette.DarkMuted,
+      palette.Vibrant, palette.LightVibrant, palette.DarkVibrant,
+      palette.Muted, palette.LightMuted, palette.DarkMuted,
     ]
       .filter(Boolean)
       .map(s => ({
-        hex: s!.hex,
-        rgb: s!.rgb,
-        population: s!.population,
+        hex: s!.hex, rgb: s!.rgb, population: s!.population,
         score: vibrancyScore(s!.rgb[0], s!.rgb[1], s!.rgb[2], s!.population),
       }))
       .filter(s => s.score > 0)
@@ -71,8 +85,6 @@ async function extractFromPath(imagePath: string, baseUrl: string): Promise<Colo
 
     const best = swatches[0];
     const [h, sat, l] = rgbToHsl(best.rgb[0], best.rgb[1], best.rgb[2]);
-
-    // Strict: reject if best swatch is still too grey or extreme
     if (sat < 20 || l < 10 || l > 90) return null;
 
     const result: ColorResult = {
@@ -83,7 +95,17 @@ async function extractFromPath(imagePath: string, baseUrl: string): Promise<Colo
       lightness: l,
     };
 
-    cache.set(cacheKey, result);
+    // 4. Persist to Supabase (fire-and-forget, don't block response)
+    void supabaseAdmin.from('color_cache').upsert({
+      path: imagePath,
+      dominant: result.dominant,
+      palette: result.palette,
+      hue: result.hue,
+      saturation: result.saturation,
+      lightness: result.lightness,
+    });
+
+    memCache.set(imagePath, result);
     return result;
   } catch {
     return null;
@@ -92,11 +114,7 @@ async function extractFromPath(imagePath: string, baseUrl: string): Promise<Colo
 
 export async function POST(req: NextRequest) {
   try {
-    const body = await req.json() as {
-      posterPaths?: string[];
-      backdropPaths?: string[];
-    };
-
+    const body = await req.json() as { posterPaths?: string[]; backdropPaths?: string[] };
     const results: Record<string, ColorResult | null> = {};
     const POSTER_BASE = 'https://image.tmdb.org/t/p/w185';
     const BACKDROP_BASE = 'https://image.tmdb.org/t/p/w300';
@@ -109,12 +127,9 @@ export async function POST(req: NextRequest) {
     const BATCH = 8;
     for (let i = 0; i < allPaths.length; i += BATCH) {
       const batch = allPaths.slice(i, i + BATCH);
-      await Promise.all(
-        batch.map(async ({ path, base }) => {
-          const result = await extractFromPath(path, base);
-          results[path] = result;
-        })
-      );
+      await Promise.all(batch.map(async ({ path, base }) => {
+        results[path] = await extractFromPath(path, base);
+      }));
     }
 
     return NextResponse.json({ results });
