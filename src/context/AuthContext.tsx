@@ -25,7 +25,19 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
 
   const fetchProfile = async (userId: string) => {
     const { data } = await supabase.from('profiles').select('*').eq('id', userId).single();
-    if (data) setProfile(data);
+    if (data) { setProfile(data); return; }
+
+    // No profile row yet — auto-create from auth metadata
+    const { data: { user: authUser } } = await supabase.auth.getUser();
+    const username = authUser?.user_metadata?.username
+      || authUser?.email?.split('@')[0]?.replace(/[^a-z0-9_]/gi, '')
+      || 'user';
+    const { data: created } = await supabase.from('profiles').insert({
+      id: userId,
+      username,
+      display_name: authUser?.user_metadata?.display_name || username,
+    }).select().single();
+    if (created) setProfile(created);
   };
 
   const refreshProfile = async () => {

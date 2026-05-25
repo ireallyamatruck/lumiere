@@ -55,6 +55,7 @@ export default function FilmActions({ movie, onAuthRequired }: Props) {
   const [spoiler, setSpoiler] = useState(false);
   const [submitting, setSubmitting] = useState(false);
   const [newListName, setNewListName] = useState('');
+  const [listCreated, setListCreated] = useState(false);
   const [hoveredAction, setHoveredAction] = useState<string | null>(null);
 
   useEffect(() => {
@@ -125,7 +126,12 @@ export default function FilmActions({ movie, onAuthRequired }: Props) {
   const createList = async () => {
     if (!newListName.trim() || !user) return;
     const { data } = await supabase.from('watchlists').insert({ user_id: user.id, name: newListName.trim(), is_public: true }).select().single();
-    if (data) { setWatchlists(prev => [...prev, data]); setNewListName(''); }
+    if (data) {
+      setWatchlists(prev => [...prev, data]);
+      setNewListName('');
+      setListCreated(true);
+      setTimeout(() => setListCreated(false), 2000);
+    }
   };
 
   const actions = [
@@ -184,10 +190,10 @@ export default function FilmActions({ movie, onAuthRequired }: Props) {
               placeholder="new list name..."
               style={{ flex: 1, background: 'transparent', borderBottom: '1px solid #222', color: '#e2d9c8', fontFamily: 'var(--font-mono)', fontSize: '11px', padding: '4px 0', outline: 'none' }}
               onKeyDown={e => { if (e.key === 'Enter') createList(); }} />
-            <button onClick={createList} style={{ fontSize: '10px', color: '#666', background: 'none', border: 'none', cursor: 'pointer' }}
-              onMouseEnter={e => (e.currentTarget.style.color = '#ccc')}
-              onMouseLeave={e => (e.currentTarget.style.color = '#666')}>
-              + create
+            <button onClick={createList} style={{ fontSize: '10px', color: listCreated ? '#6aab6a' : '#666', background: 'none', border: 'none', cursor: 'pointer', transition: 'color 0.2s' }}
+              onMouseEnter={e => { if (!listCreated) e.currentTarget.style.color = '#ccc'; }}
+              onMouseLeave={e => { if (!listCreated) e.currentTarget.style.color = '#666'; }}>
+              {listCreated ? '✓ created' : '+ create'}
             </button>
           </div>
         </div>

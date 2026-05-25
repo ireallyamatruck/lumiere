@@ -97,7 +97,7 @@ export default function ProfilePage() {
         supabase.from('reviews').select('*').eq('user_id', uid).order('created_at', { ascending: false }),
         supabase.from('ratings').select('*').eq('user_id', uid),
         supabase.from('watchlists').select('id').eq('user_id', uid),
-        supabase.from('favorite_films').select('*').eq('user_id', uid).order('position'),
+        supabase.from('favorite_films').select('*').eq('user_id', uid).order('position').throwOnError().catch(() => ({ data: [] })),
       ]);
 
       const [followingRes, followersRes] = await Promise.all([
