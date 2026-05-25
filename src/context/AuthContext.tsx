@@ -63,16 +63,19 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   }, []);
 
   const signUp = async (email: string, password: string, username: string) => {
-    // Check username availability
-    const { data: existing } = await supabase
-      .from('profiles').select('id').eq('username', username).single();
-    if (existing) return { error: 'Username already taken' };
+    try {
+      const { data: existing } = await supabase
+        .from('profiles').select('id').eq('username', username).maybeSingle();
+      if (existing) return { error: 'Username already taken' };
 
-    const { error } = await supabase.auth.signUp({
-      email, password,
-      options: { data: { username, display_name: username } },
-    });
-    return { error: error?.message ?? null };
+      const { error } = await supabase.auth.signUp({
+        email, password,
+        options: { data: { username, display_name: username } },
+      });
+      return { error: error?.message ?? null };
+    } catch (e: any) {
+      return { error: e?.message || 'Something went wrong. Please try again.' };
+    }
   };
 
   const signIn = async (email: string, password: string) => {

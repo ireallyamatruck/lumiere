@@ -90,17 +90,21 @@ export default function AuthModal({ onClose }: Props) {
     if (mode === 'signup' && !usernameOk) return;
 
     setLoading(true);
-    if (mode === 'signin') {
-      const { error } = await signIn(email, password);
-      if (error) {
-        setFormError(error.includes('Invalid') ? 'incorrect email or password' : error);
+    try {
+      if (mode === 'signin') {
+        const { error } = await signIn(email, password);
+        if (error) {
+          setFormError(error.includes('Invalid') ? 'incorrect email or password' : error);
+        } else {
+          onClose();
+        }
       } else {
-        onClose();
+        const { error } = await signUp(email, password, username);
+        if (error) setFormError(error);
+        else setDone(true);
       }
-    } else {
-      const { error } = await signUp(email, password, username);
-      if (error) setFormError(error);
-      else setDone(true);
+    } catch (e: any) {
+      setFormError(e?.message || 'Something went wrong. Please try again.');
     }
     setLoading(false);
   };
