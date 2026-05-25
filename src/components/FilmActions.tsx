@@ -104,12 +104,11 @@ export default function FilmActions({ movie, onAuthRequired }: Props) {
   const submitReview = async () => {
     if (!reviewBody.trim() || !user) return;
     setSubmitting(true);
-    await supabase.from('reviews').upsert({
+    await supabase.from('reviews').insert({
       user_id: user.id, tmdb_id: tmdbId, media_type: mediaType,
       title: reviewTitle || null, body: reviewBody, contains_spoilers: spoiler,
       created_at: new Date().toISOString(),
-      updated_at: new Date().toISOString(),
-    }, { onConflict: 'user_id,tmdb_id' });
+    });
     setSubmitting(false);
     setShowReview(false);
   };

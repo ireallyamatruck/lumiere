@@ -12,9 +12,10 @@ interface Props {
   genres: Record<number, string>;
   onClose: () => void;
   onAuthRequired: () => void;
+  readOnly?: boolean;
 }
 
-export default function MovieModal({ movie, genres, onClose, onAuthRequired }: Props) {
+export default function MovieModal({ movie, genres, onClose, onAuthRequired, readOnly }: Props) {
   const { user } = useAuth();
   const [reviews, setReviews] = useState<Review[]>([]);
   const [reviewComment, setReviewComment] = useState<Record<string, string>>({});
@@ -127,7 +128,7 @@ export default function MovieModal({ movie, genres, onClose, onAuthRequired }: P
           </div>
 
           {/* Film actions */}
-          <FilmActions movie={movie} onAuthRequired={onAuthRequired} />
+          {!readOnly && <FilmActions movie={movie} onAuthRequired={onAuthRequired} />}
 
           {/* Reviews */}
           {reviews.length > 0 && (

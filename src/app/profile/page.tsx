@@ -3,9 +3,10 @@
 import { useEffect, useState, useRef, useCallback } from 'react';
 import { useAuth } from '@/context/AuthContext';
 import { supabase } from '@/lib/supabase';
-import { posterUrl } from '@/lib/tmdb';
+import { posterUrl, Movie } from '@/lib/tmdb';
 import Image from 'next/image';
 import { useRouter } from 'next/navigation';
+import MovieModal from '@/components/MovieModal';
 
 type Tab = 'profile' | 'activity' | 'colors' | 'critiques' | 'favourites';
 
@@ -18,7 +19,7 @@ const TABS: { id: Tab; label: string }[] = [
 ];
 
 interface Stats { colors: number; palette: number; lists: number; following: number; followers: number }
-interface FilmEntry { id?: string; tmdb_id: number; media_type: string; watched_at?: string; created_at?: string; poster_path?: string; title?: string; rating?: number; colorHex?: string }
+interface FilmEntry { id?: string; tmdb_id: number; media_type: string; watched_at?: string; created_at?: string; poster_path?: string; title?: string; rating?: number; colorHex?: string; overview?: string; vote_average?: number; genre_ids?: number[] }
 interface FavoriteSlot { position: number; dbId?: string; tmdb_id?: number; media_type?: string; poster_path?: string; title?: string; colorHex?: string }
 interface ReviewEntry { id: string; tmdb_id: number; media_type: string; created_at: string; title?: string; body: string; poster_path?: string; film_title?: string; rating?: number }
 interface ActivityItem { type: 'watched' | 'liked' | 'reviewed'; tmdb_id: number; media_type: string; date: string; poster_path?: string; title?: string; body?: string; rating?: number }
@@ -29,7 +30,7 @@ function formatDate(d: string) {
 function thisYear() { return new Date().getFullYear(); }
 
 export default function ProfilePage() {
-  const { user, profile, signOut, loading } = useAuth();
+  const { user, profile, signOut, loading, refreshProfile } = useAuth();
   const router = useRouter();
   const [tab, setTab] = useState<Tab>('profile');
   const [stats, setStats] = useState<Stats>({ colors: 0, palette: 0, lists: 0, following: 0, followers: 0 });
@@ -42,11 +43,14 @@ export default function ProfilePage() {
   const [followers, setFollowers] = useState<any[]>([]);
   const [editingBio, setEditingBio] = useState(false);
   const [bioInput, setBioInput] = useState('');
+  const [bioSaved, setBioSaved] = useState(false);
   const [pageLoading, setPageLoading] = useState(true);
   const [pickerSlot, setPickerSlot] = useState<number | null>(null);
   const [pickerQuery, setPickerQuery] = useState('');
   const [pickerResults, setPickerResults] = useState<FilmEntry[]>([]);
   const [pickerSearching, setPickerSearching] = useState(false);
+  const [infoFilm, setInfoFilm] = useState<Movie | null>(null);
+  const [watchedColors, setWatchedColors] = useState<string[]>([]);
   const tmdbCache = useRef<Record<number, any>>({});
 
   useEffect(() => {
@@ -130,11 +134,22 @@ export default function ProfilePage() {
         (watched || []).slice(0, 60).map(async (w: any) => {
           try {
             const d = await fetchTmdb(w.tmdb_id, w.media_type);
-            return { ...w, poster_path: d?.poster_path, title: d?.title || d?.name, rating: rMap[w.tmdb_id] };
+            return { ...w, poster_path: d?.poster_path, title: d?.title || d?.name, rating: rMap[w.tmdb_id], overview: d?.overview, vote_average: d?.vote_average, genre_ids: d?.genre_ids };
           } catch { return { ...w, rating: rMap[w.tmdb_id] }; }
         })
       );
       setAllWatched(watchedEnriched);
+
+      // Fetch dominant colors for palette strip
+      const colorPaths = watchedEnriched.filter(w => w.poster_path).slice(0, 24).map(w => w.poster_path!);
+      if (colorPaths.length > 0) {
+        try {
+          const res = await fetch('/api/colors', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ posterPaths: colorPaths }) });
+          const { results } = await res.json();
+          const colors = colorPaths.map(p => results[p]?.dominant).filter(Boolean) as string[];
+          setWatchedColors(colors);
+        } catch {}
+      }
 
       // Enrich liked films
       const likedEnriched = await Promise.all(
@@ -196,7 +211,28 @@ export default function ProfilePage() {
   const saveBio = async () => {
     if (!user) return;
     await supabase.from('profiles').update({ bio: bioInput }).eq('id', user.id);
+    await refreshProfile();
     setEditingBio(false);
+    setBioSaved(true);
+    setTimeout(() => setBioSaved(false), 2500);
+  };
+
+  const openInfoModal = (film: FilmEntry) => {
+    const cached = tmdbCache.current[film.tmdb_id];
+    setInfoFilm({
+      id: film.tmdb_id,
+      media_type: film.media_type,
+      title: cached?.title || cached?.name || film.title,
+      name: cached?.name,
+      poster_path: film.poster_path || cached?.poster_path,
+      backdrop_path: cached?.backdrop_path,
+      overview: cached?.overview || film.overview || '',
+      vote_average: cached?.vote_average || film.vote_average || 0,
+      vote_count: cached?.vote_count || 0,
+      release_date: cached?.release_date,
+      first_air_date: cached?.first_air_date,
+      genre_ids: cached?.genre_ids || film.genre_ids || [],
+    });
   };
 
   const openPicker = (position: number) => {
@@ -321,6 +357,7 @@ export default function ProfilePage() {
               <h1 style={{ fontFamily: 'var(--font-display)', fontSize: '22px', fontWeight: 300, color: '#f0ebe0', margin: 0 }}>
                 {profile.username}
               </h1>
+              {bioSaved && <span style={{ fontSize: '10px', color: '#6aab6a', letterSpacing: '0.15em' }}>saved</span>}
               <button
                 onClick={() => setEditingBio(true)}
                 style={{ fontSize: '10px', letterSpacing: '0.15em', textTransform: 'uppercase', color: '#555', background: 'none', border: '1px solid #222', borderRadius: '2px', padding: '4px 10px', cursor: 'pointer', transition: 'all 0.2s' }}
@@ -350,10 +387,10 @@ export default function ProfilePage() {
         </div>
 
         {/* Stats row */}
-        <div style={{ display: 'flex', gap: '0', marginBottom: '0' }}>
+        <div style={{ display: 'flex', alignItems: 'flex-start', gap: '0', marginBottom: '0', flexWrap: 'wrap' }}>
           {[
             { label: 'colours', val: stats.colors },
-            { label: `palette ${thisYear()}`, val: stats.palette },
+            { label: `${thisYear()}`, val: stats.palette },
             { label: 'lists', val: stats.lists },
             { label: 'following', val: stats.following },
             { label: 'followers', val: stats.followers },
@@ -363,6 +400,17 @@ export default function ProfilePage() {
               <div style={{ fontSize: '9px', color: '#333', letterSpacing: '0.2em', textTransform: 'uppercase', marginTop: '5px' }}>{s.label}</div>
             </div>
           ))}
+          {/* Colour palette strip from watched films */}
+          {watchedColors.length > 0 && (
+            <div style={{ marginLeft: '28px', paddingLeft: '28px', borderLeft: '1px solid #141414' }}>
+              <div style={{ display: 'flex', gap: '3px', flexWrap: 'wrap', maxWidth: '180px' }}>
+                {watchedColors.map((c, i) => (
+                  <div key={i} title={c} style={{ width: '12px', height: '12px', borderRadius: '50%', background: c, flexShrink: 0 }} />
+                ))}
+              </div>
+              <div style={{ fontSize: '9px', color: '#333', letterSpacing: '0.2em', textTransform: 'uppercase', marginTop: '5px' }}>your palette</div>
+            </div>
+          )}
         </div>
 
         {/* Tabs */}
@@ -422,7 +470,8 @@ export default function ProfilePage() {
                 </div>
                 <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(90px, 1fr))', gap: '6px', maxWidth: '700px' }}>
                   {recentActivity.filter(a => a.poster_path).slice(0, 8).map((a, i) => (
-                    <div key={i} style={{ position: 'relative', aspectRatio: '2/3', borderRadius: '2px', overflow: 'hidden', background: '#111' }} title={a.title}>
+                    <div key={i} onClick={() => a.type === 'reviewed' ? setTab('critiques') : openInfoModal(a as FilmEntry)}
+                      style={{ position: 'relative', aspectRatio: '2/3', borderRadius: '2px', overflow: 'hidden', background: '#111', cursor: 'pointer' }} title={a.title}>
                       <Image src={posterUrl(a.poster_path!, 'w185')} alt={a.title || ''} fill style={{ objectFit: 'cover' }} unoptimized />
                     </div>
                   ))}
@@ -436,7 +485,14 @@ export default function ProfilePage() {
         {tab === 'activity' && (
           <div style={{ maxWidth: '580px' }}>
             {recentActivity.length === 0 ? <EmptyState text="no activity yet" /> : (
-              recentActivity.map((a, i) => <ActivityRow key={i} item={a} />)
+              recentActivity.map((a, i) => (
+                <ActivityRow key={i} item={a}
+                  onClick={() => {
+                    if (a.type === 'reviewed') { setTab('critiques'); }
+                    else openInfoModal(a as FilmEntry);
+                  }}
+                />
+              ))
             )}
           </div>
         )}
@@ -449,7 +505,7 @@ export default function ProfilePage() {
             </div>
             {allWatched.length === 0 ? <EmptyState text="no films watched yet" /> : (
               <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(88px, 1fr))', gap: '5px' }}>
-                {allWatched.map((w, i) => <FilmTile key={i} film={w} />)}
+                {allWatched.map((w, i) => <FilmTile key={i} film={w} onClick={() => openInfoModal(w)} />)}
               </div>
             )}
           </div>
@@ -478,6 +534,7 @@ export default function ProfilePage() {
           </div>
         )}
       </div>
+      <MovieModal movie={infoFilm} genres={{}} onClose={() => setInfoFilm(null)} onAuthRequired={() => {}} readOnly />
     </main>
   );
 }
@@ -526,13 +583,14 @@ function FavoriteSlotCard({ slot, onAdd, onRemove }: { slot: FavoriteSlot; onAdd
   );
 }
 
-function FilmTile({ film }: { film: FilmEntry }) {
+function FilmTile({ film, onClick }: { film: FilmEntry; onClick?: () => void }) {
   const [hovered, setHovered] = useState(false);
   if (!film.poster_path) return null;
   return (
     <div
       style={{ position: 'relative', aspectRatio: '2/3', borderRadius: '2px', overflow: 'hidden', background: '#111', cursor: 'pointer' }}
       title={film.title}
+      onClick={onClick}
       onMouseEnter={() => setHovered(true)}
       onMouseLeave={() => setHovered(false)}
     >
@@ -547,10 +605,10 @@ function FilmTile({ film }: { film: FilmEntry }) {
   );
 }
 
-function ActivityRow({ item }: { item: ActivityItem }) {
+function ActivityRow({ item, onClick }: { item: ActivityItem; onClick?: () => void }) {
   const label = { watched: 'watched', liked: 'liked', reviewed: 'reviewed' }[item.type];
   return (
-    <div style={{ display: 'flex', gap: '14px', padding: '11px 0', borderBottom: '1px solid #0a0a0a', alignItems: 'flex-start' }}>
+    <div onClick={onClick} style={{ display: 'flex', gap: '14px', padding: '11px 0', borderBottom: '1px solid #0a0a0a', alignItems: 'flex-start', cursor: onClick ? 'pointer' : 'default' }}>
       {item.poster_path ? (
         <div style={{ width: '34px', flexShrink: 0 }}>
           <div style={{ position: 'relative', aspectRatio: '2/3', borderRadius: '2px', overflow: 'hidden', background: '#111' }}>
