@@ -1,7 +1,8 @@
 'use client';
 
 import { useState, useEffect, useCallback, useRef } from 'react';
-import { Movie, fetchDiscover, fetchMorePages, fetchGenres } from '@/lib/tmdb';
+import Image from 'next/image';
+import { Movie, fetchDiscover, fetchMorePages, fetchGenres, posterUrl } from '@/lib/tmdb';
 import ColorPicker from '@/components/ColorPicker';
 import PosterCard from '@/components/PosterCard';
 import MovieModal from '@/components/MovieModal';
@@ -63,8 +64,39 @@ export default function Home() {
   const [yearMax, setYearMax] = useState(2025);
   const [showFilters, setShowFilters] = useState(false);
 
+  // Discovery mode
+  const [showDiscovery, setShowDiscovery] = useState(false);
+  const [discoveryMode, setDiscoveryMode] = useState(false);
+  const [discoveryShuffled, setDiscoveryShuffled] = useState<Movie[]>([]);
+
   const colorizedRef = useRef<Set<number>>(new Set());
   const idSetRef = useRef<Set<number>>(new Set());
+
+  // Restore mode from session or show overlay
+  useEffect(() => {
+    const saved = sessionStorage.getItem('lumiere_mode');
+    if (!saved) {
+      setShowDiscovery(true);
+    } else {
+      const isDiscover = saved === 'discover';
+      setDiscoveryMode(isDiscover);
+      if (!isDiscover) setFilmsRevealed(true);
+    }
+  }, []);
+
+  // Shuffle once when movies arrive in discovery mode
+  useEffect(() => {
+    if (discoveryMode && allMovies.length > 0 && discoveryShuffled.length === 0) {
+      setDiscoveryShuffled([...allMovies].sort(() => Math.random() - 0.5));
+    }
+  }, [discoveryMode, allMovies.length]);
+
+  const pickMode = (mode: 'discover' | 'browse') => {
+    sessionStorage.setItem('lumiere_mode', mode);
+    setShowDiscovery(false);
+    setDiscoveryMode(mode === 'discover');
+    if (mode === 'browse') setFilmsRevealed(true);
+  };
 
   const applyFilters = useCallback((movies: Movie[]) => {
     return movies.filter(m => {
@@ -151,7 +183,6 @@ export default function Home() {
     }).finally(() => setBgLoading(false));
   }, [loading]);
 
-  // Re-apply filters when filter state changes
   useEffect(() => {
     if (!filterActive) setDisplayed(applyFilters(allMovies));
   }, [selectedGenres, ratingMin, ratingMax, yearMin, yearMax, allMovies.length]);
@@ -195,70 +226,68 @@ export default function Home() {
     });
   };
 
-  const [showDiscovery, setShowDiscovery] = useState(false);
-  useEffect(() => {
-    if (!sessionStorage.getItem('lumiere_mode')) setShowDiscovery(true);
-  }, []);
-  const pickMode = (mode: 'discover' | 'browse') => {
-    sessionStorage.setItem('lumiere_mode', mode);
-    setShowDiscovery(false);
-    if (mode === 'browse') setFilmsRevealed(true);
-  };
-
   const countLabel = loading ? 'loading...'
     : filterActive ? `${displayed.length} matches · ${totalCount} total`
     : bgLoading ? `${totalCount} films · loading more...`
     : `${totalCount} films`;
 
+  // Cards with colours extracted, in shuffled order
+  const discoveryCards = discoveryShuffled.filter(m => m.dominantColor || (m.palette && m.palette.length > 0));
+
   return (
     <main className="min-h-screen bg-[#070707]">
+
+      {/* ── Discovery overlay ── */}
       {showDiscovery && (
-        <div style={{ position: 'fixed', inset: 0, background: '#070707', zIndex: 200, display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', gap: 0 }}>
+        <div style={{ position: 'fixed', inset: 0, background: '#070707', zIndex: 200, display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center' }}>
           <div style={{ fontFamily: 'var(--font-display)', fontSize: '48px', fontWeight: 300, color: '#f0ebe0', letterSpacing: '0.05em', marginBottom: '12px' }}>
             lumi<span style={{ fontStyle: 'italic', color: '#444' }}>ère</span>
           </div>
           <div style={{ fontSize: '11px', color: '#2e2e2e', letterSpacing: '0.35em', textTransform: 'uppercase', marginBottom: '64px' }}>
             cinema by colour
           </div>
-          <div style={{ fontSize: '13px', color: '#555', letterSpacing: '0.2em', marginBottom: '36px', textAlign: 'center' }}>
+          <div style={{ fontSize: '13px', color: '#444', letterSpacing: '0.15em', marginBottom: '36px' }}>
             how do you want to experience cinema tonight?
           </div>
           <div style={{ display: 'flex', gap: '16px' }}>
             <button
               onClick={() => pickMode('discover')}
-              style={{ padding: '12px 28px', border: '1px solid #2a2a2a', background: 'transparent', color: '#e2d9c8', fontSize: '11px', letterSpacing: '0.25em', textTransform: 'uppercase', cursor: 'pointer', borderRadius: '2px', transition: 'all 0.2s' }}
-              onMouseEnter={e => { e.currentTarget.style.borderColor = '#888'; e.currentTarget.style.background = '#0f0f0f'; }}
+              style={{ padding: '13px 32px', border: '1px solid #2a2a2a', background: 'transparent', color: '#e2d9c8', fontSize: '11px', letterSpacing: '0.25em', textTransform: 'uppercase', cursor: 'pointer', borderRadius: '2px', transition: 'all 0.2s' }}
+              onMouseEnter={e => { e.currentTarget.style.borderColor = '#888'; e.currentTarget.style.background = '#0c0c0c'; }}
               onMouseLeave={e => { e.currentTarget.style.borderColor = '#2a2a2a'; e.currentTarget.style.background = 'transparent'; }}
             >
               discover by colour
             </button>
             <button
               onClick={() => pickMode('browse')}
-              style={{ padding: '12px 28px', border: '1px solid #1a1a1a', background: 'transparent', color: '#555', fontSize: '11px', letterSpacing: '0.25em', textTransform: 'uppercase', cursor: 'pointer', borderRadius: '2px', transition: 'all 0.2s' }}
-              onMouseEnter={e => { e.currentTarget.style.borderColor = '#444'; e.currentTarget.style.color = '#aaa'; }}
-              onMouseLeave={e => { e.currentTarget.style.borderColor = '#1a1a1a'; e.currentTarget.style.color = '#555'; }}
+              style={{ padding: '13px 32px', border: '1px solid #161616', background: 'transparent', color: '#444', fontSize: '11px', letterSpacing: '0.25em', textTransform: 'uppercase', cursor: 'pointer', borderRadius: '2px', transition: 'all 0.2s' }}
+              onMouseEnter={e => { e.currentTarget.style.borderColor = '#444'; e.currentTarget.style.color = '#999'; }}
+              onMouseLeave={e => { e.currentTarget.style.borderColor = '#161616'; e.currentTarget.style.color = '#444'; }}
             >
               just browse
             </button>
           </div>
         </div>
       )}
-      {/* Header */}
+
+      {/* ── Header ── */}
       <header className="flex items-center justify-between px-8 pt-8 pb-0">
         <div className="flex items-baseline gap-5">
           <h1
             className="font-display font-light tracking-[0.1em] text-[#e2d9c8] cursor-pointer"
             style={{ fontFamily: 'var(--font-display)', fontSize: '38px' }}
             onClick={() => {
-              setFilmsRevealed(false);
-              setFilterActive(false);
-              setCosmosHue(null);
-              setDisplayed(allMovies);
-              setSelectedGenres(new Set());
-              setRatingMin(0); setRatingMax(10);
-              setYearMin(1950); setYearMax(2025);
-              setSearchQuery('');
-              setShowSearch(false);
+              if (!discoveryMode) {
+                setFilmsRevealed(false);
+                setFilterActive(false);
+                setCosmosHue(null);
+                setDisplayed(allMovies);
+                setSelectedGenres(new Set());
+                setRatingMin(0); setRatingMax(10);
+                setYearMin(1950); setYearMax(2025);
+                setSearchQuery('');
+                setShowSearch(false);
+              }
             }}
           >
             lumi<span className="italic text-neutral-500">ère</span>
@@ -267,22 +296,26 @@ export default function Home() {
         </div>
 
         <div className="flex items-center gap-5">
+          {/* Switch mode */}
+          <button
+            onClick={() => {
+              const next = discoveryMode ? 'browse' : 'discover';
+              setDiscoveryShuffled([]);
+              pickMode(next);
+            }}
+            style={{ fontSize: '10px', letterSpacing: '0.2em', textTransform: 'uppercase', color: '#333', background: 'none', border: 'none', cursor: 'pointer', transition: 'color 0.2s' }}
+            onMouseEnter={e => (e.currentTarget.style.color = '#888')}
+            onMouseLeave={e => (e.currentTarget.style.color = '#333')}
+          >
+            {discoveryMode ? 'browse' : 'discover'}
+          </button>
+
           {user ? (
             <div className="flex items-center gap-4">
-              <a
-                href="/profile"
-                className="flex items-center gap-2 transition-colors group"
-                style={{ textDecoration: 'none' }}
-              >
-                <div style={{
-                  width: '28px', height: '28px', borderRadius: '50%',
-                  background: '#1a1a1a', border: '1px solid #2a2a2a',
-                  display: 'flex', alignItems: 'center', justifyContent: 'center',
-                  fontSize: '12px', color: '#888', fontFamily: 'var(--font-display)',
-                  transition: 'border-color 0.2s',
-                }}
-                onMouseEnter={e => (e.currentTarget.style.borderColor = '#666')}
-                onMouseLeave={e => (e.currentTarget.style.borderColor = '#2a2a2a')}
+              <a href="/profile" className="flex items-center gap-2 transition-colors group" style={{ textDecoration: 'none' }}>
+                <div style={{ width: '28px', height: '28px', borderRadius: '50%', background: '#1a1a1a', border: '1px solid #2a2a2a', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: '12px', color: '#888', fontFamily: 'var(--font-display)', transition: 'border-color 0.2s' }}
+                  onMouseEnter={e => (e.currentTarget.style.borderColor = '#666')}
+                  onMouseLeave={e => (e.currentTarget.style.borderColor = '#2a2a2a')}
                 >
                   {profile?.username?.[0]?.toUpperCase()}
                 </div>
@@ -308,187 +341,211 @@ export default function Home() {
               sign in
             </button>
           )}
-          {filterActive && (
-            <button onClick={() => { setDisplayed(allMovies); setFilterActive(false); setCosmosHue(null); setFilmsRevealed(false); }}
-              className="text-[11px] tracking-[0.2em] uppercase text-neutral-700 hover:text-[#e2d9c8] transition-colors">clear</button>
-          )}
-          <button onClick={() => setShowSearch(s => !s)}
-            className="text-[11px] tracking-[0.2em] uppercase text-neutral-600 hover:text-[#e2d9c8] transition-colors">
-            {showSearch ? 'cancel' : 'search'}
-          </button>
-          <div className="flex items-center gap-1 border border-[#1e1e1e] rounded-sm overflow-hidden">
-            {(['grid', 'cosmos'] as ViewMode[]).map(v => (
-              <button key={v} onClick={() => setViewMode(v)}
-                className="text-[10px] tracking-[0.15em] uppercase px-3 py-[5px] transition-all duration-200"
-                style={{ background: viewMode === v ? '#1a1a1a' : 'transparent', color: viewMode === v ? '#e2d9c8' : '#444' }}>
-                {v}
+
+          {/* Browse-only controls */}
+          {!discoveryMode && (
+            <>
+              {filterActive && (
+                <button onClick={() => { setDisplayed(allMovies); setFilterActive(false); setCosmosHue(null); setFilmsRevealed(false); }}
+                  className="text-[11px] tracking-[0.2em] uppercase text-neutral-700 hover:text-[#e2d9c8] transition-colors">clear</button>
+              )}
+              <button onClick={() => setShowSearch(s => !s)}
+                className="text-[11px] tracking-[0.2em] uppercase text-neutral-600 hover:text-[#e2d9c8] transition-colors">
+                {showSearch ? 'cancel' : 'search'}
               </button>
-            ))}
-          </div>
+              <div className="flex items-center gap-1 border border-[#1e1e1e] rounded-sm overflow-hidden">
+                {(['grid', 'cosmos'] as ViewMode[]).map(v => (
+                  <button key={v} onClick={() => setViewMode(v)}
+                    className="text-[10px] tracking-[0.15em] uppercase px-3 py-[5px] transition-all duration-200"
+                    style={{ background: viewMode === v ? '#1a1a1a' : 'transparent', color: viewMode === v ? '#e2d9c8' : '#444' }}>
+                    {v}
+                  </button>
+                ))}
+              </div>
+            </>
+          )}
         </div>
       </header>
 
-      {showSearch && (
-        <form onSubmit={handleSearch} className="px-8 pt-5">
-          <input autoFocus value={searchQuery} onChange={e => setSearchQuery(e.target.value)}
-            placeholder="search films, series..."
-            className="w-full bg-transparent border-b border-[#222] text-[#e2d9c8] font-mono text-[12px] tracking-wider py-2 outline-none placeholder-neutral-700 focus:border-neutral-600 transition-colors" />
-        </form>
+      {/* ── Discovery mode content ── */}
+      {discoveryMode && (
+        <div className="px-8 py-8">
+          {loading || discoveryCards.length === 0 ? (
+            <>
+              <div style={{ fontSize: '10px', color: '#1e1e1e', letterSpacing: '0.3em', textTransform: 'uppercase', marginBottom: '24px' }}>
+                {loading ? 'reading colours...' : 'extracting colour palettes...'}
+              </div>
+              <div className="grid grid-cols-3 sm:grid-cols-4 md:grid-cols-5 lg:grid-cols-6 xl:grid-cols-7 gap-3">
+                {Array.from({ length: 28 }).map((_, i) => (
+                  <div key={i} className="skeleton rounded-sm" style={{ aspectRatio: '2/3', animationDelay: `${i * 30}ms` }} />
+                ))}
+              </div>
+            </>
+          ) : (
+            <>
+              <div style={{ fontSize: '10px', color: '#1e1e1e', letterSpacing: '0.3em', textTransform: 'uppercase', marginBottom: '24px' }}>
+                {discoveryCards.length} films · hover to reveal
+              </div>
+              <div className="grid grid-cols-3 sm:grid-cols-4 md:grid-cols-5 lg:grid-cols-6 xl:grid-cols-7 gap-3">
+                {discoveryCards.map(movie => (
+                  <DiscoveryCard key={movie.id} movie={movie} onClick={setSelected} />
+                ))}
+              </div>
+            </>
+          )}
+        </div>
       )}
 
-      {/* Color source toggle */}
-      <div className="px-8 pt-6">
-        <div className="flex items-center gap-6 mb-4">
-          <div className="text-[11px] tracking-[0.25em] text-neutral-600 uppercase">colour source</div>
-          <div className="flex items-center gap-1 border border-[#1e1e1e] rounded-sm overflow-hidden">
-            {(['poster', 'cinema'] as ColorMode[]).map(m => (
-              <button key={m} onClick={() => setColorMode(m)}
-                className="text-[10px] tracking-[0.15em] uppercase px-3 py-[5px] transition-all duration-200"
-                style={{ background: colorMode === m ? '#1a1a1a' : 'transparent', color: colorMode === m ? '#e2d9c8' : '#444' }}>
-                {m === 'poster' ? 'cover art' : 'aura'}
-              </button>
-            ))}
-          </div>
-        </div>
-      </div>
-
-      <ColorPicker hue={pickerHue} saturation={pickerSat} lightness={pickerLit}
-        onChange={(h, s, l) => { setPickerHue(h); setPickerSat(s); setPickerLit(l); }}
-        onGo={handleGo} />
-
-      {/* Filters row */}
-      <div className="px-8 pt-5">
-        <button onClick={() => setShowFilters(f => !f)}
-          className="flex items-center gap-2 mb-3 transition-colors"
-          style={{ fontSize: '12px', letterSpacing: '0.2em', textTransform: 'uppercase', color: showFilters ? '#ccc' : '#888' }}>
-          <span>filters</span>
-          {(selectedGenres.size > 0 || ratingMin > 0 || ratingMax < 10 || yearMin > 1950 || yearMax < 2025) && (
-            <span style={{ fontSize: '9px', background: '#2a2a2a', color: '#ccc', padding: '1px 6px', borderRadius: '3px' }}>active</span>
+      {/* ── Browse mode content ── */}
+      {!discoveryMode && (
+        <>
+          {showSearch && (
+            <form onSubmit={handleSearch} className="px-8 pt-5">
+              <input autoFocus value={searchQuery} onChange={e => setSearchQuery(e.target.value)}
+                placeholder="search films, series..."
+                className="w-full bg-transparent border-b border-[#222] text-[#e2d9c8] font-mono text-[12px] tracking-wider py-2 outline-none placeholder-neutral-700 focus:border-neutral-600 transition-colors" />
+            </form>
           )}
-          <span>{showFilters ? '↑' : '↓'}</span>
-        </button>
 
-        {showFilters && (
-          <div className="pb-5 border-b border-[#1a1a1a]">
-            {/* Genres */}
-            <div className="mb-5">
-              <div style={{ fontSize: '11px', letterSpacing: '0.2em', textTransform: 'uppercase', color: '#999', marginBottom: '10px' }}>genre</div>
-              <div className="flex flex-wrap gap-2">
-                {GENRES_MOVIE.map(g => (
-                  <button key={g.id} onClick={() => toggleGenre(g.id)}
-                    className="transition-all duration-150"
-                    style={{
-                      fontSize: '11px', letterSpacing: '0.08em', padding: '4px 10px', borderRadius: '3px',
-                      border: `1px solid ${selectedGenres.has(g.id) ? '#aaa' : '#2a2a2a'}`,
-                      color: selectedGenres.has(g.id) ? '#f0ebe0' : '#777',
-                      background: selectedGenres.has(g.id) ? '#222' : 'transparent',
-                      cursor: 'pointer',
-                    }}>
-                    {g.name}
+          {/* Colour source toggle */}
+          <div className="px-8 pt-6">
+            <div className="flex items-center gap-6 mb-4">
+              <div className="text-[11px] tracking-[0.25em] text-neutral-600 uppercase">colour source</div>
+              <div className="flex items-center gap-1 border border-[#1e1e1e] rounded-sm overflow-hidden">
+                {(['poster', 'cinema'] as ColorMode[]).map(m => (
+                  <button key={m} onClick={() => setColorMode(m)}
+                    className="text-[10px] tracking-[0.15em] uppercase px-3 py-[5px] transition-all duration-200"
+                    style={{ background: colorMode === m ? '#1a1a1a' : 'transparent', color: colorMode === m ? '#e2d9c8' : '#444' }}>
+                    {m === 'poster' ? 'cover art' : 'aura'}
                   </button>
                 ))}
               </div>
             </div>
+          </div>
 
-            {/* Rating + Year side by side */}
-            <div className="flex flex-wrap gap-8 mb-5">
-              <div>
-                <div style={{ fontSize: '11px', letterSpacing: '0.2em', textTransform: 'uppercase', color: '#999', marginBottom: '10px' }}>
-                  imdb rating
+          <ColorPicker hue={pickerHue} saturation={pickerSat} lightness={pickerLit}
+            onChange={(h, s, l) => { setPickerHue(h); setPickerSat(s); setPickerLit(l); }}
+            onGo={handleGo} />
+
+          {/* Filters */}
+          <div className="px-8 pt-5">
+            <button onClick={() => setShowFilters(f => !f)}
+              className="flex items-center gap-2 mb-3 transition-colors"
+              style={{ fontSize: '12px', letterSpacing: '0.2em', textTransform: 'uppercase', color: showFilters ? '#ccc' : '#888' }}>
+              <span>filters</span>
+              {(selectedGenres.size > 0 || ratingMin > 0 || ratingMax < 10 || yearMin > 1950 || yearMax < 2025) && (
+                <span style={{ fontSize: '9px', background: '#2a2a2a', color: '#ccc', padding: '1px 6px', borderRadius: '3px' }}>active</span>
+              )}
+              <span>{showFilters ? '↑' : '↓'}</span>
+            </button>
+
+            {showFilters && (
+              <div className="pb-5 border-b border-[#1a1a1a]">
+                <div className="mb-5">
+                  <div style={{ fontSize: '11px', letterSpacing: '0.2em', textTransform: 'uppercase', color: '#999', marginBottom: '10px' }}>genre</div>
+                  <div className="flex flex-wrap gap-2">
+                    {GENRES_MOVIE.map(g => (
+                      <button key={g.id} onClick={() => toggleGenre(g.id)}
+                        className="transition-all duration-150"
+                        style={{
+                          fontSize: '11px', letterSpacing: '0.08em', padding: '4px 10px', borderRadius: '3px',
+                          border: `1px solid ${selectedGenres.has(g.id) ? '#aaa' : '#2a2a2a'}`,
+                          color: selectedGenres.has(g.id) ? '#f0ebe0' : '#777',
+                          background: selectedGenres.has(g.id) ? '#222' : 'transparent',
+                          cursor: 'pointer',
+                        }}>
+                        {g.name}
+                      </button>
+                    ))}
+                  </div>
                 </div>
-                <div className="flex items-center gap-3">
-                  <span style={{ fontSize: '12px', color: '#aaa', minWidth: '28px' }}>{ratingMin.toFixed(1)}</span>
-                  <input type="range" min="0" max="10" step="0.5" value={ratingMin}
-                    onChange={e => setRatingMin(Math.min(Number(e.target.value), ratingMax))}
-                    className="w-28 accent-neutral-500" />
-                  <span style={{ fontSize: '12px', color: '#777' }}>–</span>
-                  <input type="range" min="0" max="10" step="0.5" value={ratingMax}
-                    onChange={e => setRatingMax(Math.max(Number(e.target.value), ratingMin))}
-                    className="w-28 accent-neutral-500" />
-                  <span style={{ fontSize: '12px', color: '#aaa', minWidth: '28px' }}>{ratingMax.toFixed(1)}</span>
+
+                <div className="flex flex-wrap gap-8 mb-5">
+                  <div>
+                    <div style={{ fontSize: '11px', letterSpacing: '0.2em', textTransform: 'uppercase', color: '#999', marginBottom: '10px' }}>imdb rating</div>
+                    <div className="flex items-center gap-3">
+                      <span style={{ fontSize: '12px', color: '#aaa', minWidth: '28px' }}>{ratingMin.toFixed(1)}</span>
+                      <input type="range" min="0" max="10" step="0.5" value={ratingMin}
+                        onChange={e => setRatingMin(Math.min(Number(e.target.value), ratingMax))} className="w-28 accent-neutral-500" />
+                      <span style={{ fontSize: '12px', color: '#777' }}>–</span>
+                      <input type="range" min="0" max="10" step="0.5" value={ratingMax}
+                        onChange={e => setRatingMax(Math.max(Number(e.target.value), ratingMin))} className="w-28 accent-neutral-500" />
+                      <span style={{ fontSize: '12px', color: '#aaa', minWidth: '28px' }}>{ratingMax.toFixed(1)}</span>
+                    </div>
+                  </div>
+                  <div>
+                    <div style={{ fontSize: '11px', letterSpacing: '0.2em', textTransform: 'uppercase', color: '#999', marginBottom: '10px' }}>year</div>
+                    <div className="flex items-center gap-3">
+                      <span style={{ fontSize: '12px', color: '#aaa', minWidth: '36px' }}>{yearMin}</span>
+                      <input type="range" min="1900" max="2025" step="1" value={yearMin}
+                        onChange={e => setYearMin(Math.min(Number(e.target.value), yearMax))} className="w-28 accent-neutral-500" />
+                      <span style={{ fontSize: '12px', color: '#777' }}>–</span>
+                      <input type="range" min="1900" max="2025" step="1" value={yearMax}
+                        onChange={e => setYearMax(Math.max(Number(e.target.value), yearMin))} className="w-28 accent-neutral-500" />
+                      <span style={{ fontSize: '12px', color: '#aaa', minWidth: '36px' }}>{yearMax}</span>
+                    </div>
+                  </div>
+                </div>
+
+                <div className="flex items-center gap-4">
+                  <button
+                    onClick={() => { setDisplayed(applyFilters(allMovies)); setShowFilters(false); setFilmsRevealed(true); }}
+                    style={{ fontSize: '11px', letterSpacing: '0.2em', textTransform: 'uppercase', border: '1px solid #aaa', color: '#f0ebe0', padding: '7px 20px', borderRadius: '3px', background: 'transparent', cursor: 'pointer', transition: 'all 0.2s' }}
+                    onMouseEnter={e => (e.currentTarget.style.background = '#1a1a1a')}
+                    onMouseLeave={e => (e.currentTarget.style.background = 'transparent')}
+                  >apply filters</button>
+                  <button
+                    onClick={() => { setSelectedGenres(new Set()); setRatingMin(0); setRatingMax(10); setYearMin(1950); setYearMax(2025); setDisplayed(allMovies); }}
+                    style={{ fontSize: '11px', letterSpacing: '0.15em', textTransform: 'uppercase', color: '#666', background: 'none', border: 'none', cursor: 'pointer' }}
+                    onMouseEnter={e => (e.currentTarget.style.color = '#aaa')}
+                    onMouseLeave={e => (e.currentTarget.style.color = '#666')}
+                  >reset</button>
                 </div>
               </div>
+            )}
+          </div>
 
-              <div>
-                <div style={{ fontSize: '11px', letterSpacing: '0.2em', textTransform: 'uppercase', color: '#999', marginBottom: '10px' }}>
-                  year
-                </div>
-                <div className="flex items-center gap-3">
-                  <span style={{ fontSize: '12px', color: '#aaa', minWidth: '36px' }}>{yearMin}</span>
-                  <input type="range" min="1900" max="2025" step="1" value={yearMin}
-                    onChange={e => setYearMin(Math.min(Number(e.target.value), yearMax))}
-                    className="w-28 accent-neutral-500" />
-                  <span style={{ fontSize: '12px', color: '#777' }}>–</span>
-                  <input type="range" min="1900" max="2025" step="1" value={yearMax}
-                    onChange={e => setYearMax(Math.max(Number(e.target.value), yearMin))}
-                    className="w-28 accent-neutral-500" />
-                  <span style={{ fontSize: '12px', color: '#aaa', minWidth: '36px' }}>{yearMax}</span>
-                </div>
-              </div>
-            </div>
-
-            {/* Apply + Reset */}
-            <div className="flex items-center gap-4">
-              <button
-                onClick={() => { setDisplayed(applyFilters(allMovies)); setShowFilters(false); setFilmsRevealed(true); }}
-                style={{ fontSize: '11px', letterSpacing: '0.2em', textTransform: 'uppercase', border: '1px solid #aaa', color: '#f0ebe0', padding: '7px 20px', borderRadius: '3px', background: 'transparent', cursor: 'pointer', transition: 'all 0.2s' }}
-                onMouseEnter={e => (e.currentTarget.style.background = '#1a1a1a')}
-                onMouseLeave={e => (e.currentTarget.style.background = 'transparent')}
-              >
-                apply filters
-              </button>
-              <button
-                onClick={() => { setSelectedGenres(new Set()); setRatingMin(0); setRatingMax(10); setYearMin(1950); setYearMax(2025); setDisplayed(allMovies); }}
-                style={{ fontSize: '11px', letterSpacing: '0.15em', textTransform: 'uppercase', color: '#666', background: 'none', border: 'none', cursor: 'pointer' }}
-                onMouseEnter={e => (e.currentTarget.style.color = '#aaa')}
-                onMouseLeave={e => (e.currentTarget.style.color = '#666')}
-              >
-                reset
-              </button>
+          <div className="flex items-center justify-between px-8 py-4 border-b border-[#111] mt-2">
+            <div className="text-[11px] text-neutral-600 tracking-widest">{countLabel}</div>
+            <div className="flex items-center gap-3">
+              <select value={mediaType} onChange={e => setMediaType(e.target.value as 'movie' | 'tv')}
+                className="bg-[#070707] border border-[#1e1e1e] text-neutral-500 font-mono text-[10px] tracking-widest uppercase py-[5px] px-3 rounded-sm outline-none cursor-pointer hover:border-[#333] transition-colors appearance-none">
+                <option value="movie">films</option>
+                <option value="tv">series</option>
+              </select>
+              <select value={sort} onChange={e => setSort(e.target.value)}
+                className="bg-[#070707] border border-[#1e1e1e] text-neutral-500 font-mono text-[10px] tracking-widest uppercase py-[5px] px-3 rounded-sm outline-none cursor-pointer hover:border-[#333] transition-colors appearance-none">
+                {SORT_OPTIONS.map(o => <option key={o.value} value={o.value}>{o.label}</option>)}
+              </select>
             </div>
           </div>
-        )}
-      </div>
 
-      <div className="flex items-center justify-between px-8 py-4 border-b border-[#111] mt-2">
-        <div className="text-[11px] text-neutral-600 tracking-widest">{countLabel}</div>
-        <div className="flex items-center gap-3">
-          <select value={mediaType} onChange={e => setMediaType(e.target.value as 'movie' | 'tv')}
-            className="bg-[#070707] border border-[#1e1e1e] text-neutral-500 font-mono text-[10px] tracking-widest uppercase py-[5px] px-3 rounded-sm outline-none cursor-pointer hover:border-[#333] transition-colors appearance-none">
-            <option value="movie">films</option>
-            <option value="tv">series</option>
-          </select>
-          <select value={sort} onChange={e => setSort(e.target.value)}
-            className="bg-[#070707] border border-[#1e1e1e] text-neutral-500 font-mono text-[10px] tracking-widest uppercase py-[5px] px-3 rounded-sm outline-none cursor-pointer hover:border-[#333] transition-colors appearance-none">
-            {SORT_OPTIONS.map(o => <option key={o.value} value={o.value}>{o.label}</option>)}
-          </select>
-        </div>
-      </div>
-
-      {viewMode === 'cosmos' ? (
-        <CosmosView movies={allMovies} onSelect={setSelected} activeHue={cosmosHue} />
-      ) : (
-        <div className="px-8 py-6">
-          {loading ? (
-            <div className="grid grid-cols-3 sm:grid-cols-4 md:grid-cols-5 lg:grid-cols-6 xl:grid-cols-7 gap-3">
-              {Array.from({ length: 20 }).map((_, i) => (
-                <div key={i} className="skeleton rounded-sm" style={{ aspectRatio: '2/3', animationDelay: `${i * 40}ms` }} />
-              ))}
-            </div>
-          ) : !filmsRevealed ? (
-            <EmptyPrompt />
-          ) : displayed.length === 0 ? (
-            <div className="flex flex-col items-center justify-center py-24">
-              <div style={{ fontSize: '12px', color: '#444', letterSpacing: '0.3em', textTransform: 'uppercase' }}>no results found</div>
-            </div>
+          {viewMode === 'cosmos' ? (
+            <CosmosView movies={allMovies} onSelect={setSelected} activeHue={cosmosHue} />
           ) : (
-            <div className="grid grid-cols-3 sm:grid-cols-4 md:grid-cols-5 lg:grid-cols-6 xl:grid-cols-7 gap-3">
-              {displayed.map((movie, i) => (
-                <PosterCard key={movie.id} movie={movie} index={i} onClick={setSelected} />
-              ))}
+            <div className="px-8 py-6">
+              {loading ? (
+                <div className="grid grid-cols-3 sm:grid-cols-4 md:grid-cols-5 lg:grid-cols-6 xl:grid-cols-7 gap-3">
+                  {Array.from({ length: 20 }).map((_, i) => (
+                    <div key={i} className="skeleton rounded-sm" style={{ aspectRatio: '2/3', animationDelay: `${i * 40}ms` }} />
+                  ))}
+                </div>
+              ) : !filmsRevealed ? (
+                <EmptyPrompt />
+              ) : displayed.length === 0 ? (
+                <div className="flex flex-col items-center justify-center py-24">
+                  <div style={{ fontSize: '12px', color: '#444', letterSpacing: '0.3em', textTransform: 'uppercase' }}>no results found</div>
+                </div>
+              ) : (
+                <div className="grid grid-cols-3 sm:grid-cols-4 md:grid-cols-5 lg:grid-cols-6 xl:grid-cols-7 gap-3">
+                  {displayed.map((movie, i) => (
+                    <PosterCard key={movie.id} movie={movie} index={i} onClick={setSelected} />
+                  ))}
+                </div>
+              )}
             </div>
           )}
-        </div>
+        </>
       )}
 
       <MovieModal movie={selected} genres={genres} onClose={() => setSelected(null)} onAuthRequired={() => setShowAuth(true)} />
@@ -496,6 +553,58 @@ export default function Home() {
     </main>
   );
 }
+
+// ─── Discovery card: palette bands → poster on hover ────────────────────────
+
+function DiscoveryCard({ movie, onClick }: { movie: Movie; onClick: (m: Movie) => void }) {
+  const [hovered, setHovered] = useState(false);
+  const colors = (movie.palette && movie.palette.length > 0) ? movie.palette : [movie.dominantColor || '#111'];
+
+  return (
+    <div
+      style={{ position: 'relative', aspectRatio: '2/3', borderRadius: '3px', overflow: 'hidden', cursor: 'pointer' }}
+      onMouseEnter={() => setHovered(true)}
+      onMouseLeave={() => setHovered(false)}
+      onClick={() => onClick(movie)}
+    >
+      {/* Palette face — horizontal colour bands */}
+      <div style={{ position: 'absolute', inset: 0, display: 'flex', flexDirection: 'column', opacity: hovered ? 0 : 1, transition: 'opacity 0.35s ease' }}>
+        {colors.map((c, i) => (
+          <div key={i} style={{ flex: 1, background: c }} />
+        ))}
+      </div>
+
+      {/* Poster + title — revealed on hover */}
+      <div style={{ position: 'absolute', inset: 0, opacity: hovered ? 1 : 0, transition: 'opacity 0.35s ease' }}>
+        {movie.poster_path && (
+          <Image
+            src={posterUrl(movie.poster_path, 'w342')}
+            alt={movie.title || movie.name || ''}
+            fill
+            style={{ objectFit: 'cover' }}
+            unoptimized
+          />
+        )}
+        <div style={{
+          position: 'absolute', bottom: 0, left: 0, right: 0,
+          padding: '28px 10px 10px',
+          background: 'linear-gradient(to top, rgba(0,0,0,0.92) 0%, transparent 100%)',
+        }}>
+          <div style={{ fontSize: '11px', color: '#e2d9c8', lineHeight: 1.35, letterSpacing: '0.02em' }}>
+            {movie.title || movie.name}
+          </div>
+          {(movie.release_date || movie.first_air_date) && (
+            <div style={{ fontSize: '10px', color: '#777', marginTop: '2px' }}>
+              {(movie.release_date || movie.first_air_date || '').slice(0, 4)}
+            </div>
+          )}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// ─── Browse mode empty state ─────────────────────────────────────────────────
 
 const PROMPTS = [
   { line1: 'every film has a colour.', line2: 'what are you drawn to tonight?' },
