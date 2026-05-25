@@ -17,7 +17,7 @@ interface Props {
 
 export default function MovieModal({ movie, genres, onClose, onAuthRequired, readOnly }: Props) {
   const { user } = useAuth();
-  const [reviews, setReviews] = useState<Review[]>([]);
+  const [reviews, setReviews] = useState<any[]>([]);
   const [reviewLikes, setReviewLikes] = useState<Record<string, number>>({});
   const [userLikedReviews, setUserLikedReviews] = useState<Set<string>>(new Set());
   const [reviewComment, setReviewComment] = useState<Record<string, string>>({});
@@ -36,48 +36,32 @@ export default function MovieModal({ movie, genres, onClose, onAuthRequired, rea
     return () => { document.body.style.overflow = ''; };
   }, [movie]);
 
-  useEffect(() => {
-    if (!movie) { setReviews([]); setRtRating(null); setShowReviews(false); return; }
-
-    // Fetch reviews
-    supabase
+  const fetchReviews = async (movieId: number) => {
+    const { data } = await supabase
       .from('reviews')
       .select('*, profiles(username, display_name, avatar_url)')
-      .eq('tmdb_id', movie.id)
-      .order('created_at', { ascending: false })
-      .then(async ({ data }) => {
-        const revs = data || [];
-        setReviews(revs);
+      .eq('tmdb_id', movieId)
+      .order('created_at', { ascending: false });
+    const revs = data || [];
+    setReviews(revs);
+    if (revs.length === 0) return;
+    const ids = revs.map((r: any) => r.id);
+    const { data: likes } = await supabase.from('review_likes').select('review_id').in('review_id', ids);
+    const counts: Record<string, number> = {};
+    (likes || []).forEach((l: any) => { counts[l.review_id] = (counts[l.review_id] || 0) + 1; });
+    setReviewLikes(counts);
+    if (user) {
+      const { data: myLikes } = await supabase.from('review_likes').select('review_id').in('review_id', ids).eq('user_id', user.id);
+      setUserLikedReviews(new Set((myLikes || []).map((l: any) => l.review_id)));
+    }
+  };
 
-        if (revs.length === 0) return;
-        const ids = revs.map((r: any) => r.id);
-
-        // Fetch like counts
-        const { data: likes } = await supabase
-          .from('review_likes')
-          .select('review_id')
-          .in('review_id', ids);
-        const counts: Record<string, number> = {};
-        (likes || []).forEach((l: any) => { counts[l.review_id] = (counts[l.review_id] || 0) + 1; });
-        setReviewLikes(counts);
-
-        // Fetch which ones the current user liked
-        if (user) {
-          const { data: myLikes } = await supabase
-            .from('review_likes')
-            .select('review_id')
-            .in('review_id', ids)
-            .eq('user_id', user.id);
-          setUserLikedReviews(new Set((myLikes || []).map((l: any) => l.review_id)));
-        }
-      });
-
-    // Fetch RT rating
+  useEffect(() => {
+    if (!movie) { setReviews([]); setRtRating(null); setShowReviews(false); return; }
+    fetchReviews(movie.id);
     const type = movie.title ? 'movie' : 'tv';
     fetch(`/api/ratings?tmdb_id=${movie.id}&type=${type}`)
-      .then(r => r.json())
-      .then(d => { if (d.rt) setRtRating(d.rt); })
-      .catch(() => {});
+      .then(r => r.json()).then(d => { if (d.rt) setRtRating(d.rt); }).catch(() => {});
   }, [movie?.id, user?.id]);
 
   const toggleReviewLike = async (reviewId: string) => {
@@ -199,13 +183,13 @@ export default function MovieModal({ movie, genres, onClose, onAuthRequired, rea
           </div>
 
           {/* Film actions */}
-          {!readOnly && <FilmActions movie={movie} onAuthRequired={onAuthRequired} />}
+          {!readOnly && <FilmActions movie={movie} onAuthRequired={onAuthRequired} onReviewSubmit={() => fetchReviews(movie.id)} />}
 
           {/* View Reviews toggle */}
           {!readOnly && (
             <div className="px-6 pb-2">
               <button
-                onClick={() => setShowReviews(s => !s)}
+                onClick={() => { const next = !showReviews; setShowReviews(next); if (next) fetchReviews(movie.id); }}
                 style={{ fontSize: '11px', letterSpacing: '0.2em', textTransform: 'uppercase', color: showReviews ? '#e2d9c8' : '#444', background: 'none', border: '1px solid #1e1e1e', borderRadius: '3px', padding: '7px 16px', cursor: 'pointer', transition: 'all 0.2s', width: '100%' }}
                 onMouseEnter={e => { e.currentTarget.style.borderColor = '#444'; e.currentTarget.style.color = '#e2d9c8'; }}
                 onMouseLeave={e => { if (!showReviews) { e.currentTarget.style.borderColor = '#1e1e1e'; e.currentTarget.style.color = '#444'; } }}

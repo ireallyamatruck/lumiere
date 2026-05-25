@@ -8,7 +8,7 @@ import Image from 'next/image';
 import { useRouter } from 'next/navigation';
 import MovieModal from '@/components/MovieModal';
 
-type Tab = 'profile' | 'activity' | 'colors' | 'critiques' | 'favourites';
+type Tab = 'profile' | 'activity' | 'colors' | 'critiques' | 'favourites' | 'lists' | 'circles';
 
 const TABS: { id: Tab; label: string }[] = [
   { id: 'profile', label: 'Profile' },
@@ -16,6 +16,8 @@ const TABS: { id: Tab; label: string }[] = [
   { id: 'colors', label: 'Colors' },
   { id: 'critiques', label: 'Critiques' },
   { id: 'favourites', label: 'Favourites' },
+  { id: 'lists', label: 'Lists' },
+  { id: 'circles', label: 'Circles' },
 ];
 
 interface Stats { colors: number; palette: number; lists: number; following: number; followers: number }
@@ -23,6 +25,7 @@ interface FilmEntry { id?: string; tmdb_id: number; media_type: string; watched_
 interface FavoriteSlot { position: number; dbId?: string; tmdb_id?: number; media_type?: string; poster_path?: string; title?: string; colorHex?: string }
 interface ReviewEntry { id: string; tmdb_id: number; media_type: string; created_at: string; title?: string; body: string; poster_path?: string; film_title?: string; rating?: number }
 interface ActivityItem { type: 'watched' | 'liked' | 'reviewed'; tmdb_id: number; media_type: string; date: string; poster_path?: string; title?: string; body?: string; rating?: number }
+interface WatchlistData { id: string; name: string; is_public: boolean; items: { tmdb_id: number; media_type: string }[] }
 
 function formatDate(d: string) {
   return new Date(d).toLocaleDateString('en-GB', { day: 'numeric', month: 'short', year: 'numeric' });
@@ -49,8 +52,13 @@ export default function ProfilePage() {
   const [pickerQuery, setPickerQuery] = useState('');
   const [pickerResults, setPickerResults] = useState<FilmEntry[]>([]);
   const [pickerSearching, setPickerSearching] = useState(false);
-  const [infoFilm, setInfoFilm] = useState<Movie | null>(null);
+  const [modalFilm, setModalFilm] = useState<Movie | null>(null);
+  const [modalReadOnly, setModalReadOnly] = useState(false);
   const [watchedColors, setWatchedColors] = useState<string[]>([]);
+  const [colorYearFilter, setColorYearFilter] = useState<number | null>(null);
+  const [circlesView, setCirclesView] = useState<'followers' | 'following'>('followers');
+  const [watchlistsData, setWatchlistsData] = useState<WatchlistData[]>([]);
+  const [expandedList, setExpandedList] = useState<string | null>(null);
   const tmdbCache = useRef<Record<number, any>>({});
 
   useEffect(() => {
@@ -100,7 +108,7 @@ export default function ProfilePage() {
         supabase.from('likes').select('*').eq('user_id', uid).order('created_at', { ascending: false }),
         supabase.from('reviews').select('*').eq('user_id', uid).order('created_at', { ascending: false }),
         supabase.from('ratings').select('*').eq('user_id', uid),
-        supabase.from('watchlists').select('id').eq('user_id', uid),
+        supabase.from('watchlists').select('id, name, is_public').eq('user_id', uid),
         supabase.from('favorite_films').select('*').eq('user_id', uid).order('position'),
       ]);
 
@@ -128,6 +136,16 @@ export default function ProfilePage() {
         following: followingData.length,
         followers: followersData.length,
       });
+
+      // Load watchlist items
+      const listIds = (listData || []).map((l: any) => l.id);
+      if (listIds.length > 0) {
+        const { data: wlItems } = await supabase.from('watchlist_items').select('watchlist_id, tmdb_id, media_type').in('watchlist_id', listIds);
+        const grouped: Record<string, { tmdb_id: number; media_type: string }[]> = {};
+        listIds.forEach((id: string) => { grouped[id] = []; });
+        (wlItems || []).forEach((item: any) => { grouped[item.watchlist_id]?.push({ tmdb_id: item.tmdb_id, media_type: item.media_type }); });
+        setWatchlistsData((listData || []).map((l: any) => ({ id: l.id, name: l.name, is_public: l.is_public, items: grouped[l.id] || [] })));
+      }
 
       // Enrich watched films
       const watchedEnriched = await Promise.all(
@@ -219,9 +237,9 @@ export default function ProfilePage() {
     setTimeout(() => setBioSaved(false), 2500);
   };
 
-  const openInfoModal = (film: FilmEntry) => {
+  const openModal = (film: FilmEntry, readOnly = false) => {
     const cached = tmdbCache.current[film.tmdb_id];
-    setInfoFilm({
+    setModalFilm({
       id: film.tmdb_id,
       media_type: film.media_type,
       title: cached?.title || cached?.name || film.title,
@@ -235,6 +253,7 @@ export default function ProfilePage() {
       first_air_date: cached?.first_air_date,
       genre_ids: cached?.genre_ids || film.genre_ids || [],
     });
+    setModalReadOnly(readOnly);
   };
 
   const openPicker = (position: number) => {
@@ -391,14 +410,25 @@ export default function ProfilePage() {
         {/* Stats row */}
         <div style={{ display: 'flex', alignItems: 'flex-start', gap: '0', marginBottom: '0', flexWrap: 'wrap' }}>
           {[
-            { label: 'colours', val: stats.colors },
-            { label: `${thisYear()}`, val: stats.palette },
-            { label: 'lists', val: stats.lists },
-            { label: 'following', val: stats.following },
-            { label: 'followers', val: stats.followers },
+            { key: 'colors', label: 'colors', val: stats.colors },
+            { key: 'year', label: `palette ${thisYear()}`, val: stats.palette },
+            { key: 'lists', label: 'lists', val: stats.lists },
+            { key: 'following', label: 'following', val: stats.following },
+            { key: 'followers', label: 'followers', val: stats.followers },
           ].map((s, i) => (
-            <div key={s.label} style={{ paddingRight: '28px', marginRight: i < 4 ? '28px' : 0, borderRight: i < 4 ? '1px solid #141414' : 'none' }}>
-              <div style={{ fontSize: '18px', color: '#e2d9c8', fontWeight: 300, lineHeight: 1 }}>{s.val}</div>
+            <div key={s.key}
+              onClick={() => {
+                if (s.key === 'colors') { setTab('colors'); setColorYearFilter(null); }
+                else if (s.key === 'year') { setTab('colors'); setColorYearFilter(thisYear()); }
+                else if (s.key === 'lists') { setTab('lists'); }
+                else if (s.key === 'following') { setTab('circles'); setCirclesView('following'); }
+                else if (s.key === 'followers') { setTab('circles'); setCirclesView('followers'); }
+              }}
+              style={{ paddingRight: '28px', marginRight: i < 4 ? '28px' : 0, borderRight: i < 4 ? '1px solid #141414' : 'none', cursor: 'pointer' }}
+              onMouseEnter={e => (e.currentTarget.querySelector('div:first-child') as HTMLElement).style.color = '#fff'}
+              onMouseLeave={e => (e.currentTarget.querySelector('div:first-child') as HTMLElement).style.color = '#e2d9c8'}
+            >
+              <div style={{ fontSize: '18px', color: '#e2d9c8', fontWeight: 300, lineHeight: 1, transition: 'color 0.15s' }}>{s.val}</div>
               <div style={{ fontSize: '9px', color: '#333', letterSpacing: '0.2em', textTransform: 'uppercase', marginTop: '5px' }}>{s.label}</div>
             </div>
           ))}
@@ -472,8 +502,11 @@ export default function ProfilePage() {
                 </div>
                 <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(90px, 1fr))', gap: '6px', maxWidth: '700px' }}>
                   {recentActivity.filter(a => a.poster_path).slice(0, 8).map((a, i) => (
-                    <div key={i} onClick={() => a.type === 'reviewed' ? setTab('critiques') : openInfoModal(a as FilmEntry)}
-                      style={{ position: 'relative', aspectRatio: '2/3', borderRadius: '2px', overflow: 'hidden', background: '#111', cursor: 'pointer' }} title={a.title}>
+                    <div key={i} onClick={() => a.type === 'reviewed' ? setTab('critiques') : openModal(a as FilmEntry, true)}
+                      style={{ position: 'relative', aspectRatio: '2/3', borderRadius: '2px', overflow: 'hidden', background: '#111', cursor: 'pointer', transition: 'filter 0.2s, transform 0.2s' }}
+                      title={a.title}
+                      onMouseEnter={e => { e.currentTarget.style.filter = 'brightness(1.35)'; e.currentTarget.style.transform = 'scale(1.05)'; }}
+                      onMouseLeave={e => { e.currentTarget.style.filter = 'brightness(1)'; e.currentTarget.style.transform = 'scale(1)'; }}>
                       <Image src={posterUrl(a.poster_path!, 'w185')} alt={a.title || ''} fill style={{ objectFit: 'cover' }} unoptimized />
                     </div>
                   ))}
@@ -491,7 +524,7 @@ export default function ProfilePage() {
                 <ActivityRow key={i} item={a}
                   onClick={() => {
                     if (a.type === 'reviewed') { setTab('critiques'); }
-                    else openInfoModal(a as FilmEntry);
+                    else openModal(a as FilmEntry, true);
                   }}
                 />
               ))
@@ -502,12 +535,21 @@ export default function ProfilePage() {
         {/* COLORS — all watched films */}
         {tab === 'colors' && (
           <div>
-            <div style={{ fontSize: '10px', color: '#2e2e2e', letterSpacing: '0.3em', textTransform: 'uppercase', marginBottom: '20px' }}>
-              {stats.colors} films
+            <div style={{ display: 'flex', alignItems: 'center', gap: '16px', marginBottom: '20px' }}>
+              <div style={{ fontSize: '10px', color: '#2e2e2e', letterSpacing: '0.3em', textTransform: 'uppercase' }}>
+                {colorYearFilter ? `${colorYearFilter} · ` : ''}{(colorYearFilter ? allWatched.filter(w => new Date(w.watched_at || w.created_at || '').getFullYear() === colorYearFilter) : allWatched).length} films
+              </div>
+              {colorYearFilter && (
+                <button onClick={() => setColorYearFilter(null)} style={{ fontSize: '9px', color: '#555', background: 'none', border: '1px solid #222', borderRadius: '2px', padding: '2px 8px', cursor: 'pointer', letterSpacing: '0.15em', textTransform: 'uppercase' }}
+                  onMouseEnter={e => (e.currentTarget.style.color = '#aaa')} onMouseLeave={e => (e.currentTarget.style.color = '#555')}>
+                  all years
+                </button>
+              )}
             </div>
             {allWatched.length === 0 ? <EmptyState text="no films watched yet" /> : (
               <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(88px, 1fr))', gap: '5px' }}>
-                {allWatched.map((w, i) => <FilmTile key={i} film={w} onClick={() => openInfoModal(w)} />)}
+                {(colorYearFilter ? allWatched.filter(w => new Date(w.watched_at || w.created_at || '').getFullYear() === colorYearFilter) : allWatched)
+                  .map((w, i) => <FilmTile key={i} film={w} onClick={() => openModal(w, true)} />)}
               </div>
             )}
           </div>
@@ -520,7 +562,7 @@ export default function ProfilePage() {
               {stats.colors > 0 ? reviews.length : 0} reviews
             </div>
             {reviews.length === 0 ? <EmptyState text="no reviews written yet" /> : (
-              reviews.map((r, i) => <ReviewCard key={i} review={r} />)
+              reviews.map((r, i) => <ReviewCard key={i} review={r} onPosterClick={() => openModal(r as FilmEntry, false)} />)
             )}
           </div>
         )}
@@ -530,13 +572,73 @@ export default function ProfilePage() {
           <div>
             {likedFilms.length === 0 ? <EmptyState text="no liked films yet" /> : (
               <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(88px, 1fr))', gap: '5px' }}>
-                {likedFilms.map((l, i) => <FilmTile key={i} film={l} />)}
+                {likedFilms.map((l, i) => <FilmTile key={i} film={l} onClick={() => openModal(l, false)} />)}
               </div>
             )}
           </div>
         )}
+        {/* LISTS */}
+        {tab === 'lists' && (
+          <div style={{ maxWidth: '800px' }}>
+            {watchlistsData.length === 0 ? <EmptyState text="no lists yet" /> : (
+              watchlistsData.map(wl => (
+                <div key={wl.id} style={{ marginBottom: '32px' }}>
+                  <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '12px' }}>
+                    <div>
+                      <button onClick={() => setExpandedList(expandedList === wl.id ? null : wl.id)}
+                        style={{ fontSize: '13px', color: '#e2d9c8', background: 'none', border: 'none', cursor: 'pointer', letterSpacing: '0.05em', padding: 0 }}
+                        onMouseEnter={e => (e.currentTarget.style.color = '#fff')}
+                        onMouseLeave={e => (e.currentTarget.style.color = '#e2d9c8')}>
+                        {wl.name}
+                      </button>
+                      <span style={{ fontSize: '10px', color: '#333', marginLeft: '10px', letterSpacing: '0.1em' }}>{wl.items.length} films</span>
+                    </div>
+                    <span style={{ fontSize: '9px', color: '#2a2a2a', letterSpacing: '0.15em', textTransform: 'uppercase' }}>{wl.is_public ? 'public' : 'private'}</span>
+                  </div>
+                  {expandedList === wl.id ? (
+                    <ListItemGrid items={wl.items} fetchTmdb={fetchTmdb} onFilmClick={(film) => openModal(film, false)} />
+                  ) : (
+                    <div style={{ display: 'flex', gap: '4px' }}>
+                      {wl.items.slice(0, 8).map((item, i) => (
+                        <div key={i} style={{ width: '60px', aspectRatio: '2/3', borderRadius: '2px', background: '#111', flexShrink: 0 }} />
+                      ))}
+                      {wl.items.length === 0 && <div style={{ fontSize: '11px', color: '#222', letterSpacing: '0.1em' }}>empty</div>}
+                    </div>
+                  )}
+                </div>
+              ))
+            )}
+          </div>
+        )}
+
+        {/* CIRCLES */}
+        {tab === 'circles' && (
+          <div>
+            <div style={{ display: 'flex', gap: '24px', marginBottom: '32px' }}>
+              {(['followers', 'following'] as const).map(v => (
+                <button key={v} onClick={() => setCirclesView(v)}
+                  style={{ fontSize: '11px', letterSpacing: '0.2em', textTransform: 'uppercase', color: circlesView === v ? '#e2d9c8' : '#333', background: 'none', border: 'none', borderBottom: circlesView === v ? '1px solid #e2d9c8' : '1px solid transparent', paddingBottom: '6px', cursor: 'pointer', transition: 'all 0.15s' }}>
+                  {v} · {v === 'followers' ? stats.followers : stats.following}
+                </button>
+              ))}
+            </div>
+            {circlesView === 'followers' && (
+              <div style={{ display: 'flex', flexWrap: 'wrap', gap: '20px' }}>
+                {followers.length === 0 ? <EmptyState text="no followers yet" /> :
+                  followers.map((f: any, i: number) => <UserCircle key={i} profile={f['profiles!follows_follower_id_fkey'] || f.profiles} />)}
+              </div>
+            )}
+            {circlesView === 'following' && (
+              <div style={{ display: 'flex', flexWrap: 'wrap', gap: '20px' }}>
+                {following.length === 0 ? <EmptyState text="not following anyone yet" /> :
+                  following.map((f: any, i: number) => <UserCircle key={i} profile={f['profiles!follows_following_id_fkey'] || f.profiles} />)}
+              </div>
+            )}
+          </div>
+        )}
+
       </div>
-      <MovieModal movie={infoFilm} genres={{}} onClose={() => setInfoFilm(null)} onAuthRequired={() => {}} readOnly />
+      <MovieModal movie={modalFilm} genres={{}} onClose={() => setModalFilm(null)} onAuthRequired={() => {}} readOnly={modalReadOnly} />
     </main>
   );
 }
@@ -647,12 +749,14 @@ function ActivityRow({ item, onClick }: { item: ActivityItem; onClick?: () => vo
   );
 }
 
-function ReviewCard({ review }: { review: ReviewEntry }) {
+function ReviewCard({ review, onPosterClick }: { review: ReviewEntry; onPosterClick?: () => void }) {
   return (
     <div style={{ display: 'flex', gap: '16px', padding: '18px 0', borderBottom: '1px solid #0f0f0f' }}>
       {review.poster_path && (
-        <div style={{ width: '48px', flexShrink: 0 }}>
-          <div style={{ position: 'relative', aspectRatio: '2/3', borderRadius: '2px', overflow: 'hidden', background: '#111' }}>
+        <div onClick={onPosterClick} style={{ width: '48px', flexShrink: 0, cursor: onPosterClick ? 'pointer' : 'default' }}
+          onMouseEnter={e => { if (onPosterClick) e.currentTarget.style.filter = 'brightness(1.3)'; }}
+          onMouseLeave={e => { e.currentTarget.style.filter = 'brightness(1)'; }}>
+          <div style={{ position: 'relative', aspectRatio: '2/3', borderRadius: '2px', overflow: 'hidden', background: '#111', transition: 'filter 0.2s' }}>
             <Image src={posterUrl(review.poster_path, 'w185')} alt={review.film_title || ''} fill style={{ objectFit: 'cover' }} unoptimized />
           </div>
         </div>
@@ -676,4 +780,40 @@ function ReviewCard({ review }: { review: ReviewEntry }) {
 
 function EmptyState({ text }: { text: string }) {
   return <div style={{ fontSize: '12px', color: '#222', letterSpacing: '0.15em', padding: '48px 0' }}>{text}</div>;
+}
+
+function ListItemGrid({ items, fetchTmdb, onFilmClick }: { items: { tmdb_id: number; media_type: string }[]; fetchTmdb: (id: number, type: string) => Promise<any>; onFilmClick: (film: any) => void }) {
+  const [enriched, setEnriched] = useState<any[]>([]);
+  useEffect(() => {
+    Promise.all(items.slice(0, 50).map(async item => {
+      try { const d = await fetchTmdb(item.tmdb_id, item.media_type); return { ...item, poster_path: d?.poster_path, title: d?.title || d?.name, overview: d?.overview, vote_average: d?.vote_average, genre_ids: d?.genre_ids }; }
+      catch { return item; }
+    })).then(setEnriched);
+  }, [items.length]);
+  return (
+    <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(80px, 1fr))', gap: '4px' }}>
+      {enriched.map((item, i) => item.poster_path ? (
+        <div key={i} onClick={() => onFilmClick(item)}
+          style={{ position: 'relative', aspectRatio: '2/3', borderRadius: '2px', overflow: 'hidden', background: '#111', cursor: 'pointer', transition: 'filter 0.2s' }}
+          onMouseEnter={e => { e.currentTarget.style.filter = 'brightness(1.3)'; }}
+          onMouseLeave={e => { e.currentTarget.style.filter = 'brightness(1)'; }}>
+          <Image src={posterUrl(item.poster_path, 'w185')} alt={item.title || ''} fill style={{ objectFit: 'cover' }} unoptimized />
+        </div>
+      ) : <div key={i} style={{ aspectRatio: '2/3', background: '#111', borderRadius: '2px' }} />)}
+    </div>
+  );
+}
+
+function UserCircle({ profile }: { profile: any }) {
+  if (!profile) return null;
+  return (
+    <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '8px', width: '72px' }}>
+      <div style={{ width: '52px', height: '52px', borderRadius: '50%', background: '#1a1a1a', border: '1px solid #2a2a2a', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: '20px', color: '#555', fontFamily: 'var(--font-display)', fontWeight: 300, transition: 'border-color 0.2s', cursor: 'default' }}
+        onMouseEnter={e => (e.currentTarget.style.borderColor = '#555')}
+        onMouseLeave={e => (e.currentTarget.style.borderColor = '#2a2a2a')}>
+        {profile?.username?.[0]?.toUpperCase()}
+      </div>
+      <div style={{ fontSize: '10px', color: '#555', letterSpacing: '0.05em', textAlign: 'center', wordBreak: 'break-word' }}>{profile?.username}</div>
+    </div>
+  );
 }

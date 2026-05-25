@@ -8,6 +8,7 @@ import { Movie, getTitle } from '@/lib/tmdb';
 interface Props {
   movie: Movie;
   onAuthRequired: () => void;
+  onReviewSubmit?: () => void;
 }
 
 function StarRating({ value, onChange }: { value: number; onChange: (v: number) => void }) {
@@ -38,7 +39,7 @@ const ACTION_ICONS: Record<string, string> = {
   watched: '◎', like: '♥', watchlist: '⊕', review: '✎'
 };
 
-export default function FilmActions({ movie, onAuthRequired }: Props) {
+export default function FilmActions({ movie, onAuthRequired, onReviewSubmit }: Props) {
   const { user } = useAuth();
   const tmdbId = movie.id;
   const mediaType = movie.title ? 'movie' : 'tv';
@@ -111,6 +112,9 @@ export default function FilmActions({ movie, onAuthRequired }: Props) {
     });
     setSubmitting(false);
     setShowReview(false);
+    setReviewTitle('');
+    setReviewBody('');
+    onReviewSubmit?.();
   };
 
   const toggleWatchlist = async (wlId: string) => {
