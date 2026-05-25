@@ -1,12 +1,20 @@
 import { NextRequest, NextResponse } from 'next/server';
+import { supabaseAdmin } from '@/lib/supabase-admin';
 
 export const maxDuration = 60;
 
-// Triggers a fresh fetch+store for movies and TV by calling /api/movies with cache bypass.
-// Protected by CACHE_REBUILD_SECRET env var.
-// Call: POST /api/cache/rebuild?secret=YOUR_SECRET&type=movie
-//       POST /api/cache/rebuild?secret=YOUR_SECRET&type=tv
-// Or both at once (takes longer): POST /api/cache/rebuild?secret=YOUR_SECRET
+const TMDB_BASE = 'https://api.themoviedb.org/3';
+const API_KEY = process.env.NEXT_PUBLIC_TMDB_API_KEY!;
+
+async function fetchPage(type: string, page: number): Promise<any[]> {
+  const url = `${TMDB_BASE}/discover/${type}?api_key=${API_KEY}&sort_by=popularity.desc&vote_count.gte=50&page=${page}&include_adult=false`;
+  try {
+    const res = await fetch(url);
+    if (!res.ok) return [];
+    const data = await res.json();
+    return (data.results || []).filter((m: any) => m.poster_path);
+  } catch { return []; }
+}
 
 export async function GET(req: NextRequest) {
   const secret = req.nextUrl.searchParams.get('secret');
@@ -14,30 +22,52 @@ export async function GET(req: NextRequest) {
     return NextResponse.json({ error: 'unauthorized' }, { status: 401 });
   }
 
-  const typeParam = req.nextUrl.searchParams.get('type');
-  const types = typeParam ? [typeParam] : ['movie', 'tv'];
-  const base = new URL(req.url).origin;
+  const type = req.nextUrl.searchParams.get('type') || 'movie';
+  const PAGES = 200;
+  const CHUNK = 20;
+  const all: any[] = [];
+  const seen = new Set<number>();
 
-  const results: Record<string, any> = {};
-  for (const type of types) {
-    try {
-      // Force-expire the cache by deleting existing rows first
-      const { supabaseAdmin } = await import('@/lib/supabase-admin');
-      await supabaseAdmin
-        .from('movies_cache')
-        .update({ cached_at: '2000-01-01T00:00:00Z' })
-        .eq('media_type', type);
-
-      // Trigger a fresh fetch via the movies route
-      const res = await fetch(`${base}/api/movies?type=${type}`, {
-        next: { revalidate: 0 },
-      });
-      const data = await res.json();
-      results[type] = { count: data.movies?.length ?? 0, fromCache: data.fromCache };
-    } catch (e) {
-      results[type] = { error: String(e) };
-    }
+  // Fetch all pages from TMDB in parallel chunks
+  for (let start = 1; start <= PAGES; start += CHUNK) {
+    const end = Math.min(start + CHUNK - 1, PAGES);
+    const pageNums = Array.from({ length: end - start + 1 }, (_, i) => start + i);
+    const results = await Promise.all(pageNums.map(p => fetchPage(type, p)));
+    results.flat().forEach(m => {
+      if (!seen.has(m.id)) { seen.add(m.id); all.push(m); }
+    });
+    await new Promise(r => setTimeout(r, 100));
   }
 
-  return NextResponse.json({ rebuilt: results, at: new Date().toISOString() });
+  // Store in Supabase in chunks of 500
+  const rows = all.map((m, i) => ({
+    tmdb_id: m.id,
+    media_type: type,
+    title: m.title ?? m.name ?? null,
+    poster_path: m.poster_path ?? null,
+    backdrop_path: m.backdrop_path ?? null,
+    overview: m.overview ?? '',
+    release_date: m.release_date ?? null,
+    first_air_date: m.first_air_date ?? null,
+    vote_average: m.vote_average ?? 0,
+    vote_count: m.vote_count ?? 0,
+    genre_ids: m.genre_ids ?? [],
+    popularity_rank: i,
+    cached_at: new Date().toISOString(),
+  }));
+
+  const STORE_CHUNK = 500;
+  for (let i = 0; i < rows.length; i += STORE_CHUNK) {
+    const { error } = await supabaseAdmin
+      .from('movies_cache')
+      .upsert(rows.slice(i, i + STORE_CHUNK));
+    if (error) return NextResponse.json({ error: error.message }, { status: 500 });
+  }
+
+  return NextResponse.json({
+    type,
+    count: all.length,
+    stored: rows.length,
+    at: new Date().toISOString(),
+  });
 }
