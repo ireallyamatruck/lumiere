@@ -7,76 +7,68 @@ import { posterUrl } from '@/lib/tmdb';
 import Image from 'next/image';
 import { useRouter } from 'next/navigation';
 
-type Tab = 'palette' | 'mycolors' | 'frames' | 'critiques' | 'queue' | 'lists' | 'likes' | 'tags' | 'circle';
+type Tab = 'films' | 'diary' | 'reviews' | 'watchlist' | 'likes' | 'lists' | 'circle';
 
 const TABS: { id: Tab; label: string }[] = [
-  { id: 'palette', label: 'Palette' },
-  { id: 'mycolors', label: 'My Colors' },
-  { id: 'frames', label: 'Frames' },
-  { id: 'critiques', label: 'Critiques' },
-  { id: 'queue', label: 'Queue' },
-  { id: 'lists', label: 'Lists' },
+  { id: 'films', label: 'Films' },
+  { id: 'diary', label: 'Diary' },
+  { id: 'reviews', label: 'Reviews' },
+  { id: 'watchlist', label: 'Watchlist' },
   { id: 'likes', label: 'Likes' },
-  { id: 'tags', label: 'Tags' },
+  { id: 'lists', label: 'Lists' },
   { id: 'circle', label: 'Circle' },
 ];
 
-interface Stats {
-  films: number;
-  reviews: number;
-  lists: number;
-  following: number;
-  followers: number;
-  likes: number;
+interface Stats { films: number; reviews: number; lists: number; following: number; followers: number }
+interface FilmEntry {
+  id: string; tmdb_id: number; media_type: string; watched_at: string;
+  poster_path?: string; title?: string; rating?: number;
+}
+interface ReviewEntry {
+  id: string; tmdb_id: number; media_type: string; created_at: string;
+  title?: string; body: string; poster_path?: string; film_title?: string; rating?: number;
 }
 
-interface ActivityItem {
-  type: 'watched' | 'review' | 'like' | 'watchlist';
-  tmdb_id: number;
-  poster_path?: string;
-  title?: string;
-  body?: string;
-  date: string;
-  color?: string;
+function formatDate(d: string) {
+  return new Date(d).toLocaleDateString('en-GB', { day: 'numeric', month: 'short', year: 'numeric' });
 }
 
 export default function ProfilePage() {
   const { user, profile, signOut, loading } = useAuth();
   const router = useRouter();
-  const [tab, setTab] = useState<Tab>('palette');
-  const [stats, setStats] = useState<Stats>({ films: 0, reviews: 0, lists: 0, following: 0, followers: 0, likes: 0 });
-  const [activity, setActivity] = useState<ActivityItem[]>([]);
-  const [watchedPosters, setWatchedPosters] = useState<any[]>([]);
-  const [likedPosters, setLikedPosters] = useState<any[]>([]);
-  const [reviews, setReviews] = useState<any[]>([]);
-  const [lists, setLists] = useState<any[]>([]);
+  const [tab, setTab] = useState<Tab>('films');
+  const [stats, setStats] = useState<Stats>({ films: 0, reviews: 0, lists: 0, following: 0, followers: 0 });
+  const [allWatched, setAllWatched] = useState<FilmEntry[]>([]);
+  const [recentFilms, setRecentFilms] = useState<FilmEntry[]>([]);
+  const [likedFilms, setLikedFilms] = useState<FilmEntry[]>([]);
+  const [reviews, setReviews] = useState<ReviewEntry[]>([]);
+  const [watchlists, setWatchlists] = useState<any[]>([]);
   const [following, setFollowing] = useState<any[]>([]);
   const [followers, setFollowers] = useState<any[]>([]);
-  const [reputation, setReputation] = useState(0);
   const [editingBio, setEditingBio] = useState(false);
   const [bioInput, setBioInput] = useState('');
-  const [tmdbCache, setTmdbCache] = useState<Record<number, any>>({});
+  const [pageLoading, setPageLoading] = useState(true);
+  const [tmdbCache] = useState<Record<number, any>>({});
 
   useEffect(() => {
     if (!loading && !user) router.push('/');
-  }, [user, loading]);
+    if (!loading && !profile) setPageLoading(false);
+  }, [user, profile, loading]);
 
   useEffect(() => {
     if (!user || !profile) return;
     setBioInput(profile.bio || '');
     loadAll();
-  }, [user, profile]);
+  }, [user?.id]);
 
   const fetchTmdb = async (tmdb_id: number, media_type = 'movie') => {
     if (tmdbCache[tmdb_id]) return tmdbCache[tmdb_id];
     const key = process.env.NEXT_PUBLIC_TMDB_API_KEY;
     const res = await fetch(`https://api.themoviedb.org/3/${media_type}/${tmdb_id}?api_key=${key}`);
     const data = await res.json();
-    setTmdbCache(prev => ({ ...prev, [tmdb_id]: data }));
+    tmdbCache[tmdb_id] = data;
     return data;
   };
-
-  const [pageLoading, setPageLoading] = useState(true);
 
   const loadAll = async () => {
     if (!user) return;
@@ -86,11 +78,13 @@ export default function ProfilePage() {
         { data: watched },
         { data: likedData },
         { data: reviewData },
+        { data: ratingsData },
         { data: listData },
       ] = await Promise.all([
         supabase.from('watched').select('*').eq('user_id', uid).order('watched_at', { ascending: false }),
         supabase.from('likes').select('*').eq('user_id', uid).order('created_at', { ascending: false }),
         supabase.from('reviews').select('*').eq('user_id', uid).order('created_at', { ascending: false }),
+        supabase.from('ratings').select('*').eq('user_id', uid),
         supabase.from('watchlists').select('*, watchlist_items(count)').eq('user_id', uid),
       ]);
 
@@ -98,8 +92,12 @@ export default function ProfilePage() {
         supabase.from('follows').select('*, profiles!follows_following_id_fkey(username, display_name)').eq('follower_id', uid),
         supabase.from('follows').select('*, profiles!follows_follower_id_fkey(username, display_name)').eq('following_id', uid),
       ]);
+
       const followingData = followingRes.error ? [] : (followingRes.data || []);
       const followersData = followersRes.error ? [] : (followersRes.data || []);
+
+      const rMap: Record<number, number> = {};
+      (ratingsData || []).forEach((r: any) => { rMap[r.tmdb_id] = r.rating; });
 
       setStats({
         films: watched?.length || 0,
@@ -107,53 +105,41 @@ export default function ProfilePage() {
         lists: listData?.length || 0,
         following: followingData.length,
         followers: followersData.length,
-        likes: likedData?.length || 0,
       });
       setFollowing(followingData);
       setFollowers(followersData);
-      setReviews(reviewData || []);
-      setLists(listData || []);
+      setWatchlists(listData || []);
 
-      const watchedWithData = await Promise.all(
-        (watched || []).slice(0, 20).map(async w => {
+      const watchedEnriched = await Promise.all(
+        (watched || []).slice(0, 60).map(async (w: any) => {
           try {
             const d = await fetchTmdb(w.tmdb_id, w.media_type);
-            return { ...w, poster_path: d?.poster_path, title: d?.title || d?.name };
-          } catch { return { ...w, poster_path: null, title: '' }; }
+            return { ...w, poster_path: d?.poster_path, title: d?.title || d?.name, rating: rMap[w.tmdb_id] };
+          } catch { return { ...w, poster_path: null, title: '', rating: rMap[w.tmdb_id] }; }
         })
       );
-      setWatchedPosters(watchedWithData);
+      setAllWatched(watchedEnriched);
+      setRecentFilms(watchedEnriched.filter(f => f.poster_path).slice(0, 5));
 
-      const likedWithData = await Promise.all(
-        (likedData || []).slice(0, 20).map(async l => {
+      const likedEnriched = await Promise.all(
+        (likedData || []).slice(0, 60).map(async (l: any) => {
           try {
             const d = await fetchTmdb(l.tmdb_id, l.media_type);
             return { ...l, poster_path: d?.poster_path, title: d?.title || d?.name };
           } catch { return { ...l, poster_path: null, title: '' }; }
         })
       );
-      setLikedPosters(likedWithData);
+      setLikedFilms(likedEnriched);
 
-      const acts: ActivityItem[] = [
-        ...(watched || []).slice(0, 10).map((w: any) => ({ type: 'watched' as const, tmdb_id: w.tmdb_id, date: w.watched_at, media_type: w.media_type })),
-        ...(likedData || []).slice(0, 10).map((l: any) => ({ type: 'like' as const, tmdb_id: l.tmdb_id, date: l.created_at, media_type: l.media_type })),
-        ...(reviewData || []).slice(0, 10).map((r: any) => ({ type: 'review' as const, tmdb_id: r.tmdb_id, date: r.created_at, body: r.body, media_type: r.media_type })),
-      ].sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime()).slice(0, 20);
-
-      const enriched = await Promise.all(acts.map(async a => {
-        try {
-          const d = await fetchTmdb(a.tmdb_id, (a as any).media_type || 'movie');
-          return { ...a, poster_path: d?.poster_path, title: d?.title || d?.name };
-        } catch { return { ...a, poster_path: null, title: 'unknown' }; }
-      }));
-      setActivity(enriched);
-
-      if ((reviewData || []).length > 0) {
-        const reviewIds = (reviewData || []).map((r: any) => r.id);
-        const { data: reviewLikes } = await supabase.from('review_likes').select('id').in('review_id', reviewIds);
-        const totalLikes = (reviewLikes || []).length;
-        setReputation(Math.round(Math.min(5, (totalLikes / Math.max(1, reviewIds.length)) * 2.5) * 10) / 10);
-      }
+      const reviewsEnriched = await Promise.all(
+        (reviewData || []).slice(0, 20).map(async (r: any) => {
+          try {
+            const d = await fetchTmdb(r.tmdb_id, r.media_type);
+            return { ...r, poster_path: d?.poster_path, film_title: d?.title || d?.name, rating: rMap[r.tmdb_id] };
+          } catch { return { ...r, poster_path: null, film_title: 'unknown', rating: rMap[r.tmdb_id] }; }
+        })
+      );
+      setReviews(reviewsEnriched);
     } catch (e) {
       console.error('Profile load error:', e);
     } finally {
@@ -167,117 +153,146 @@ export default function ProfilePage() {
     setEditingBio(false);
   };
 
-  const formatDate = (d: string) => {
-    const date = new Date(d);
-    return date.toLocaleDateString('en-GB', { day: 'numeric', month: 'short', year: 'numeric' });
-  };
-
-  if (loading || !profile || pageLoading) return (
+  if (loading || pageLoading) return (
     <div className="min-h-screen bg-[#070707] flex items-center justify-center">
       <div style={{ fontSize: '11px', color: '#444', letterSpacing: '0.3em' }}>loading...</div>
     </div>
   );
+  if (!profile) return null;
+
+  // Group diary by month
+  const diaryByMonth: Record<string, FilmEntry[]> = {};
+  allWatched.forEach(w => {
+    const key = new Date(w.watched_at).toLocaleDateString('en-US', { month: 'long', year: 'numeric' });
+    if (!diaryByMonth[key]) diaryByMonth[key] = [];
+    diaryByMonth[key].push(w);
+  });
 
   return (
     <main className="min-h-screen bg-[#070707]" style={{ color: '#e2d9c8' }}>
-      {/* Header nav */}
+      {/* Nav */}
       <div className="flex items-center justify-between px-8 py-5 border-b" style={{ borderColor: '#111' }}>
-        <a href="/" className="font-display font-light" style={{ fontFamily: 'var(--font-display)', fontSize: '24px', color: '#f0ebe0', textDecoration: 'none' }}>
-          lumi<span style={{ fontStyle: 'italic', color: '#666' }}>ère</span>
+        <a href="/" style={{ fontFamily: 'var(--font-display)', fontSize: '22px', color: '#f0ebe0', textDecoration: 'none', fontWeight: 300 }}>
+          lumi<span style={{ fontStyle: 'italic', color: '#555' }}>ère</span>
         </a>
-        <button onClick={async () => { await signOut(); router.push('/'); }}
-          style={{ fontSize: '11px', letterSpacing: '0.2em', textTransform: 'uppercase', color: '#666', background: 'none', border: 'none', cursor: 'pointer' }}
-          onMouseEnter={e => (e.currentTarget.style.color = '#ccc')}
-          onMouseLeave={e => (e.currentTarget.style.color = '#666')}>
-          logout
-        </button>
+        <button
+          onClick={async () => { await signOut(); router.push('/'); }}
+          style={{ fontSize: '11px', letterSpacing: '0.2em', textTransform: 'uppercase', color: '#444', background: 'none', border: 'none', cursor: 'pointer' }}
+          onMouseEnter={e => (e.currentTarget.style.color = '#aaa')}
+          onMouseLeave={e => (e.currentTarget.style.color = '#444')}
+        >logout</button>
       </div>
 
-      {/* Profile hero */}
-      <div className="px-8 py-8 border-b" style={{ borderColor: '#111' }}>
-        <div className="flex items-start gap-6">
-          {/* Avatar */}
-          <div style={{ width: '80px', height: '80px', borderRadius: '50%', background: '#1a1a1a', border: '1px solid #2a2a2a', display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>
-            <span style={{ fontSize: '28px', color: '#888', fontFamily: 'var(--font-display)', fontWeight: 300 }}>
-              {profile.username?.[0]?.toUpperCase()}
-            </span>
-          </div>
+      {/* Profile header */}
+      <div className="px-8 pt-10 pb-8 border-b" style={{ borderColor: '#111' }}>
+        <div style={{ maxWidth: '900px' }}>
+          {/* Top row */}
+          <div className="flex items-start gap-6 mb-8">
+            <div style={{
+              width: '68px', height: '68px', borderRadius: '50%',
+              background: '#111', border: '1px solid #1e1e1e', flexShrink: 0,
+              display: 'flex', alignItems: 'center', justifyContent: 'center',
+            }}>
+              <span style={{ fontSize: '24px', color: '#555', fontFamily: 'var(--font-display)', fontWeight: 300 }}>
+                {profile.username?.[0]?.toUpperCase()}
+              </span>
+            </div>
 
-          {/* Info */}
-          <div className="flex-1">
-            <div className="flex items-center gap-3 mb-1">
-              <h1 style={{ fontFamily: 'var(--font-display)', fontSize: '28px', fontWeight: 300, color: '#f0ebe0' }}>
+            <div style={{ flex: 1 }}>
+              <div style={{ fontFamily: 'var(--font-display)', fontSize: '26px', fontWeight: 300, color: '#f0ebe0', lineHeight: 1, marginBottom: '4px' }}>
                 {profile.display_name || profile.username}
-              </h1>
-              {reputation > 0 && (
-                <span style={{ fontSize: '12px', color: '#888' }}>★ {reputation.toFixed(1)}</span>
+              </div>
+              <div style={{ fontSize: '11px', color: '#3a3a3a', letterSpacing: '0.1em', marginBottom: '12px' }}>
+                @{profile.username}
+              </div>
+              {editingBio ? (
+                <div style={{ display: 'flex', gap: '10px', alignItems: 'center' }}>
+                  <input
+                    value={bioInput}
+                    onChange={e => setBioInput(e.target.value)}
+                    style={{ background: 'transparent', borderBottom: '1px solid #2a2a2a', color: '#ccc', fontSize: '13px', padding: '3px 0', outline: 'none', width: '300px' }}
+                    onKeyDown={e => { if (e.key === 'Enter') saveBio(); if (e.key === 'Escape') setEditingBio(false); }}
+                    autoFocus
+                  />
+                  <button onClick={saveBio} style={{ fontSize: '10px', color: '#666', background: 'none', border: 'none', cursor: 'pointer', letterSpacing: '0.1em' }}>save</button>
+                  <button onClick={() => setEditingBio(false)} style={{ fontSize: '10px', color: '#444', background: 'none', border: 'none', cursor: 'pointer' }}>cancel</button>
+                </div>
+              ) : (
+                <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
+                  <span style={{ fontSize: '13px', color: profile.bio ? '#777' : '#2e2e2e', fontStyle: profile.bio ? 'normal' : 'italic' }}>
+                    {profile.bio || 'add a bio'}
+                  </span>
+                  <button
+                    onClick={() => setEditingBio(true)}
+                    style={{ fontSize: '10px', color: '#2e2e2e', background: 'none', border: 'none', cursor: 'pointer', letterSpacing: '0.1em' }}
+                    onMouseEnter={e => (e.currentTarget.style.color = '#888')}
+                    onMouseLeave={e => (e.currentTarget.style.color = '#2e2e2e')}
+                  >edit</button>
+                </div>
               )}
             </div>
-            <div style={{ fontSize: '12px', color: '#666', marginBottom: '8px', letterSpacing: '0.05em' }}>
-              @{profile.username}
-            </div>
 
-            {/* Bio */}
-            {editingBio ? (
-              <div className="flex gap-2 items-center">
-                <input value={bioInput} onChange={e => setBioInput(e.target.value)}
-                  style={{ background: 'transparent', borderBottom: '1px solid #333', color: '#ccc', fontFamily: 'var(--font-mono)', fontSize: '13px', padding: '4px 0', outline: 'none', width: '300px' }}
-                  onKeyDown={e => { if (e.key === 'Enter') saveBio(); if (e.key === 'Escape') setEditingBio(false); }}
-                  autoFocus
-                />
-                <button onClick={saveBio} style={{ fontSize: '10px', color: '#888', background: 'none', border: 'none', cursor: 'pointer', letterSpacing: '0.15em' }}>save</button>
-              </div>
-            ) : (
-              <div className="flex items-center gap-3">
-                <p style={{ fontSize: '13px', color: '#888', fontStyle: profile.bio ? 'normal' : 'italic' }}>
-                  {profile.bio || 'no bio yet'}
-                </p>
-                <button onClick={() => setEditingBio(true)}
-                  style={{ fontSize: '10px', color: '#444', background: 'none', border: 'none', cursor: 'pointer' }}
-                  onMouseEnter={e => (e.currentTarget.style.color = '#888')}
-                  onMouseLeave={e => (e.currentTarget.style.color = '#444')}>
-                  edit
-                </button>
-              </div>
-            )}
-
-            <div style={{ fontSize: '12px', color: '#555', marginTop: '10px', letterSpacing: '0.08em', fontStyle: 'italic' }}>
-              colors are cinema, & cinema is color
+            {/* Stats */}
+            <div style={{ display: 'flex', gap: '32px', flexShrink: 0 }}>
+              {[
+                { label: 'films', val: stats.films },
+                { label: 'reviews', val: stats.reviews },
+                { label: 'following', val: stats.following },
+                { label: 'followers', val: stats.followers },
+              ].map(s => (
+                <div key={s.label} style={{ textAlign: 'center' }}>
+                  <div style={{ fontSize: '20px', color: '#e2d9c8', lineHeight: 1, fontWeight: 300 }}>{s.val}</div>
+                  <div style={{ fontSize: '9px', color: '#3a3a3a', letterSpacing: '0.15em', textTransform: 'uppercase', marginTop: '5px' }}>{s.label}</div>
+                </div>
+              ))}
             </div>
           </div>
 
-          {/* Stats */}
-          <div className="flex gap-6 flex-shrink-0">
-            {[
-              { label: 'films', val: stats.films },
-              { label: 'reviews', val: stats.reviews },
-              { label: 'lists', val: stats.lists },
-              { label: 'following', val: stats.following },
-              { label: 'followers', val: stats.followers },
-            ].map(s => (
-              <div key={s.label} className="text-center">
-                <div style={{ fontSize: '22px', fontWeight: 400, color: '#f0ebe0', lineHeight: 1 }}>{s.val}</div>
-                <div style={{ fontSize: '10px', color: '#555', letterSpacing: '0.15em', textTransform: 'uppercase', marginTop: '4px' }}>{s.label}</div>
+          {/* Recent films strip */}
+          {recentFilms.length > 0 && (
+            <div>
+              <div style={{ fontSize: '9px', color: '#2e2e2e', letterSpacing: '0.3em', textTransform: 'uppercase', marginBottom: '10px' }}>recent films</div>
+              <div style={{ display: 'flex', gap: '6px' }}>
+                {recentFilms.map((f, i) => (
+                  <div key={i} style={{ width: '48px', flexShrink: 0 }} title={f.title}>
+                    <div style={{ position: 'relative', aspectRatio: '2/3', borderRadius: '2px', overflow: 'hidden', background: '#111' }}>
+                      <Image src={posterUrl(f.poster_path!, 'w185')} alt={f.title || ''} fill style={{ objectFit: 'cover' }} unoptimized />
+                    </div>
+                    {f.rating && (
+                      <div style={{ fontSize: '9px', color: '#555', marginTop: '3px', letterSpacing: '1px', textAlign: 'center' }}>
+                        {'★'.repeat(f.rating)}
+                      </div>
+                    )}
+                  </div>
+                ))}
               </div>
-            ))}
-          </div>
+            </div>
+          )}
         </div>
       </div>
 
       {/* Tabs */}
-      <div className="border-b" style={{ borderColor: '#111' }}>
-        <div className="flex px-8 overflow-x-auto" style={{ scrollbarWidth: 'none' }}>
+      <div style={{ borderBottom: '1px solid #111' }}>
+        <div style={{ display: 'flex', paddingLeft: '32px', overflowX: 'auto', scrollbarWidth: 'none' }}>
           {TABS.map(t => (
-            <button key={t.id} onClick={() => setTab(t.id)}
+            <button
+              key={t.id}
+              onClick={() => setTab(t.id)}
               style={{
-                padding: '14px 18px', fontSize: '12px', letterSpacing: '0.1em',
-                color: tab === t.id ? '#f0ebe0' : '#555',
-                borderBottom: tab === t.id ? '2px solid #f0ebe0' : '2px solid transparent',
-                background: 'none', border: 'none',
-                cursor: 'pointer', whiteSpace: 'nowrap', transition: 'color 0.2s',
+                padding: '13px 16px',
+                fontSize: '11px',
+                letterSpacing: '0.14em',
+                textTransform: 'uppercase',
+                color: tab === t.id ? '#e2d9c8' : '#444',
+                background: 'none',
+                border: 'none',
+                borderBottom: tab === t.id ? '1px solid #e2d9c8' : '1px solid transparent',
+                cursor: 'pointer',
+                whiteSpace: 'nowrap',
+                transition: 'color 0.15s',
               }}
-              onMouseEnter={e => { if (tab !== t.id) e.currentTarget.style.color = '#aaa'; }}
-              onMouseLeave={e => { if (tab !== t.id) e.currentTarget.style.color = '#555'; }}
+              onMouseEnter={e => { if (tab !== t.id) e.currentTarget.style.color = '#888'; }}
+              onMouseLeave={e => { if (tab !== t.id) e.currentTarget.style.color = '#444'; }}
             >
               {t.label}
             </button>
@@ -286,80 +301,65 @@ export default function ProfilePage() {
       </div>
 
       {/* Tab content */}
-      <div className="px-8 py-8">
+      <div style={{ padding: '32px', maxWidth: '960px' }}>
 
-        {/* PALETTE — watched films as poster grid */}
-        {tab === 'palette' && (
+        {/* FILMS — dense poster grid */}
+        {tab === 'films' && (
           <div>
-            <div style={{ fontSize: '11px', color: '#555', letterSpacing: '0.25em', textTransform: 'uppercase', marginBottom: '20px' }}>
+            <div style={{ fontSize: '10px', color: '#333', letterSpacing: '0.25em', textTransform: 'uppercase', marginBottom: '20px' }}>
               {stats.films} films watched
             </div>
-            {watchedPosters.length === 0 ? (
-              <Empty text="no films watched yet" />
-            ) : (
-              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(100px, 1fr))', gap: '8px' }}>
-                {watchedPosters.map((w, i) => (
-                  <PosterThumb key={i} poster_path={w.poster_path} title={w.title} />
+            {allWatched.length === 0 ? <EmptyState text="no films watched yet" /> : (
+              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(88px, 1fr))', gap: '5px' }}>
+                {allWatched.map((w, i) => (
+                  <FilmTile key={i} film={w} />
                 ))}
               </div>
             )}
           </div>
         )}
 
-        {/* MY COLORS — activity timeline */}
-        {tab === 'mycolors' && (
-          <div style={{ maxWidth: '600px' }}>
-            <div style={{ fontSize: '11px', color: '#555', letterSpacing: '0.25em', textTransform: 'uppercase', marginBottom: '24px' }}>
-              recent activity
-            </div>
-            {activity.length === 0 ? <Empty text="no activity yet" /> : (
-              <div style={{ display: 'flex', flexDirection: 'column', gap: '0' }}>
-                {activity.map((a, i) => (
-                  <ActivityRow key={i} item={a} formatDate={formatDate} />
-                ))}
-              </div>
-            )}
-          </div>
-        )}
-
-        {/* FRAMES — diary */}
-        {tab === 'frames' && (
-          <div style={{ maxWidth: '600px' }}>
-            {activity.filter(a => a.type === 'watched').length === 0 ? <Empty text="no entries yet" /> : (
-              activity.filter(a => a.type === 'watched').map((a, i) => (
-                <ActivityRow key={i} item={a} formatDate={formatDate} />
-              ))
-            )}
-          </div>
-        )}
-
-        {/* CRITIQUES — reviews */}
-        {tab === 'critiques' && (
+        {/* DIARY — grouped by month */}
+        {tab === 'diary' && (
           <div style={{ maxWidth: '640px' }}>
-            {reviews.length === 0 ? <Empty text="no reviews written yet" /> : (
-              reviews.map((r, i) => (
-                <div key={i} style={{ borderBottom: '1px solid #111', paddingBottom: '20px', marginBottom: '20px' }}>
-                  <div style={{ fontSize: '10px', color: '#555', letterSpacing: '0.15em', marginBottom: '6px' }}>
-                    {formatDate(r.created_at)}
+            {allWatched.length === 0 ? <EmptyState text="no diary entries yet" /> : (
+              Object.entries(diaryByMonth).map(([month, films]) => (
+                <div key={month} style={{ marginBottom: '40px' }}>
+                  <div style={{
+                    fontSize: '10px', color: '#444', letterSpacing: '0.3em', textTransform: 'uppercase',
+                    marginBottom: '12px', paddingBottom: '10px', borderBottom: '1px solid #0f0f0f',
+                  }}>
+                    {month}
                   </div>
-                  {r.title && <div style={{ fontFamily: 'var(--font-display)', fontSize: '17px', color: '#e8e0d0', marginBottom: '6px' }}>{r.title}</div>}
-                  <p style={{ fontFamily: 'var(--font-display)', fontSize: '14px', color: '#bbb', lineHeight: '1.7' }}>{r.body}</p>
+                  {films.map((f, i) => <DiaryRow key={i} film={f} />)}
                 </div>
               ))
             )}
           </div>
         )}
 
-        {/* QUEUE — watchlists */}
-        {tab === 'queue' && (
-          <div>
-            {lists.length === 0 ? <Empty text="no watchlists yet" /> : (
-              <div style={{ display: 'flex', flexDirection: 'column', gap: '12px', maxWidth: '480px' }}>
-                {lists.map((l: any, i: number) => (
-                  <div key={i} style={{ border: '1px solid #1e1e1e', borderRadius: '4px', padding: '14px 16px' }}>
-                    <div style={{ fontSize: '14px', color: '#e8e0d0', marginBottom: '4px' }}>{l.name}</div>
-                    {l.description && <div style={{ fontSize: '12px', color: '#666' }}>{l.description}</div>}
-                    <div style={{ fontSize: '10px', color: '#444', marginTop: '6px', letterSpacing: '0.1em' }}>
+        {/* REVIEWS */}
+        {tab === 'reviews' && (
+          <div style={{ maxWidth: '660px' }}>
+            <div style={{ fontSize: '10px', color: '#333', letterSpacing: '0.25em', textTransform: 'uppercase', marginBottom: '20px' }}>
+              {stats.reviews} reviews
+            </div>
+            {reviews.length === 0 ? <EmptyState text="no reviews written yet" /> : (
+              reviews.map((r, i) => <ReviewCard key={i} review={r} />)
+            )}
+          </div>
+        )}
+
+        {/* WATCHLIST */}
+        {tab === 'watchlist' && (
+          <div style={{ maxWidth: '480px' }}>
+            {watchlists.length === 0 ? <EmptyState text="no watchlists yet" /> : (
+              <div style={{ display: 'flex', flexDirection: 'column', gap: '6px' }}>
+                {watchlists.map((l: any, i: number) => (
+                  <div key={i} style={{ border: '1px solid #141414', borderRadius: '3px', padding: '14px 16px' }}>
+                    <div style={{ fontSize: '14px', color: '#e2d9c8', marginBottom: '4px' }}>{l.name}</div>
+                    {l.description && <div style={{ fontSize: '12px', color: '#555', marginBottom: '6px' }}>{l.description}</div>}
+                    <div style={{ fontSize: '10px', color: '#333', letterSpacing: '0.12em', textTransform: 'uppercase' }}>
                       {l.watchlist_items?.[0]?.count || 0} films
                     </div>
                   </div>
@@ -369,54 +369,51 @@ export default function ProfilePage() {
           </div>
         )}
 
+        {/* LIKES */}
+        {tab === 'likes' && (
+          <div>
+            {likedFilms.length === 0 ? <EmptyState text="no liked films yet" /> : (
+              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(88px, 1fr))', gap: '5px' }}>
+                {likedFilms.map((l, i) => <FilmTile key={i} film={l} />)}
+              </div>
+            )}
+          </div>
+        )}
+
         {/* LISTS */}
         {tab === 'lists' && (
           <div style={{ maxWidth: '480px' }}>
-            {lists.length === 0 ? <Empty text="no lists yet" /> : (
-              lists.map((l: any, i: number) => (
-                <div key={i} style={{ borderBottom: '1px solid #111', padding: '14px 0' }}>
-                  <div style={{ fontSize: '14px', color: '#e8e0d0' }}>{l.name}</div>
-                  <div style={{ fontSize: '11px', color: '#555', marginTop: '4px' }}>{formatDate(l.created_at)}</div>
+            {watchlists.length === 0 ? <EmptyState text="no lists yet" /> : (
+              watchlists.map((l: any, i: number) => (
+                <div key={i} style={{ borderBottom: '1px solid #0f0f0f', padding: '14px 0' }}>
+                  <div style={{ fontSize: '15px', color: '#e2d9c8' }}>{l.name}</div>
+                  <div style={{ fontSize: '10px', color: '#333', marginTop: '5px', letterSpacing: '0.1em', textTransform: 'uppercase' }}>
+                    {l.watchlist_items?.[0]?.count || 0} films · {formatDate(l.created_at)}
+                  </div>
                 </div>
               ))
             )}
           </div>
         )}
 
-        {/* LIKES */}
-        {tab === 'likes' && (
-          <div>
-            {likedPosters.length === 0 ? <Empty text="no liked films yet" /> : (
-              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(100px, 1fr))', gap: '8px' }}>
-                {likedPosters.map((l, i) => (
-                  <PosterThumb key={i} poster_path={l.poster_path} title={l.title} />
-                ))}
-              </div>
-            )}
-          </div>
-        )}
-
-        {/* TAGS */}
-        {tab === 'tags' && <Empty text="no tags yet" />}
-
-        {/* CIRCLE — following/followers */}
+        {/* CIRCLE */}
         {tab === 'circle' && (
-          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '40px', maxWidth: '640px' }}>
+          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '48px', maxWidth: '540px' }}>
             <div>
-              <div style={{ fontSize: '11px', color: '#555', letterSpacing: '0.25em', textTransform: 'uppercase', marginBottom: '16px' }}>
-                following {stats.following}
+              <div style={{ fontSize: '10px', color: '#333', letterSpacing: '0.25em', textTransform: 'uppercase', marginBottom: '16px' }}>
+                following · {stats.following}
               </div>
-              {following.length === 0 ? <Empty text="not following anyone" /> : (
+              {following.length === 0 ? <EmptyState text="not following anyone" /> : (
                 following.map((f: any, i: number) => (
                   <UserRow key={i} username={f.profiles?.username} displayName={f.profiles?.display_name} />
                 ))
               )}
             </div>
             <div>
-              <div style={{ fontSize: '11px', color: '#555', letterSpacing: '0.25em', textTransform: 'uppercase', marginBottom: '16px' }}>
-                followers {stats.followers}
+              <div style={{ fontSize: '10px', color: '#333', letterSpacing: '0.25em', textTransform: 'uppercase', marginBottom: '16px' }}>
+                followers · {stats.followers}
               </div>
-              {followers.length === 0 ? <Empty text="no followers yet" /> : (
+              {followers.length === 0 ? <EmptyState text="no followers yet" /> : (
                 followers.map((f: any, i: number) => (
                   <UserRow key={i} username={f.profiles?.username} displayName={f.profiles?.display_name} />
                 ))
@@ -429,42 +426,90 @@ export default function ProfilePage() {
   );
 }
 
-function PosterThumb({ poster_path, title }: { poster_path: string | null; title: string }) {
-  if (!poster_path) return null;
+function FilmTile({ film }: { film: FilmEntry }) {
+  const [hovered, setHovered] = useState(false);
+  if (!film.poster_path) return null;
   return (
-    <div style={{ position: 'relative', aspectRatio: '2/3', borderRadius: '3px', overflow: 'hidden', background: '#111', cursor: 'pointer' }}
-      title={title}>
-      <Image src={posterUrl(poster_path, 'w185')} alt={title} fill style={{ objectFit: 'cover' }} unoptimized />
+    <div
+      style={{ position: 'relative', aspectRatio: '2/3', borderRadius: '2px', overflow: 'hidden', background: '#111', cursor: 'pointer' }}
+      title={film.title}
+      onMouseEnter={() => setHovered(true)}
+      onMouseLeave={() => setHovered(false)}
+    >
+      <Image src={posterUrl(film.poster_path, 'w185')} alt={film.title || ''} fill style={{ objectFit: 'cover' }} unoptimized />
+      {hovered && (
+        <div style={{ position: 'absolute', inset: 0, background: 'rgba(0,0,0,0.78)', display: 'flex', flexDirection: 'column', justifyContent: 'flex-end', padding: '8px 6px' }}>
+          <div style={{ fontSize: '10px', color: '#e2d9c8', lineHeight: 1.3 }}>{film.title}</div>
+          {film.rating && (
+            <div style={{ fontSize: '9px', color: '#888', marginTop: '3px', letterSpacing: '1px' }}>{'★'.repeat(film.rating)}</div>
+          )}
+        </div>
+      )}
     </div>
   );
 }
 
-function ActivityRow({ item, formatDate }: { item: any; formatDate: (d: string) => string }) {
-  const typeLabel: Record<string, string> = {
-    watched: 'watched', like: 'liked', review: 'reviewed', watchlist: 'added to watchlist'
-  };
+function DiaryRow({ film }: { film: FilmEntry }) {
+  const date = new Date(film.watched_at);
   return (
-    <div style={{ display: 'flex', gap: '14px', padding: '12px 0', borderBottom: '1px solid #0f0f0f', alignItems: 'flex-start' }}>
-      {item.poster_path && (
-        <div style={{ width: '36px', height: '54px', borderRadius: '2px', overflow: 'hidden', flexShrink: 0, background: '#111' }}>
-          <Image src={posterUrl(item.poster_path, 'w185')} alt={item.title || ''} width={36} height={54} style={{ objectFit: 'cover' }} unoptimized />
+    <div style={{ display: 'flex', gap: '14px', padding: '10px 0', borderBottom: '1px solid #0a0a0a', alignItems: 'flex-start' }}>
+      <div style={{ width: '38px', textAlign: 'center', flexShrink: 0, paddingTop: '2px' }}>
+        <div style={{ fontSize: '9px', color: '#333', letterSpacing: '0.1em', textTransform: 'uppercase' }}>
+          {date.toLocaleDateString('en-US', { weekday: 'short' })}
+        </div>
+        <div style={{ fontSize: '20px', color: '#444', lineHeight: 1, marginTop: '2px', fontWeight: 300 }}>
+          {date.getDate()}
+        </div>
+      </div>
+      {film.poster_path ? (
+        <div style={{ width: '30px', flexShrink: 0 }}>
+          <div style={{ position: 'relative', aspectRatio: '2/3', borderRadius: '2px', overflow: 'hidden', background: '#111' }}>
+            <Image src={posterUrl(film.poster_path, 'w185')} alt={film.title || ''} fill style={{ objectFit: 'cover' }} unoptimized />
+          </div>
+        </div>
+      ) : <div style={{ width: '30px', flexShrink: 0 }} />}
+      <div style={{ flex: 1 }}>
+        <div style={{ fontFamily: 'var(--font-display)', fontSize: '15px', color: '#ddd5c3', marginBottom: '4px' }}>{film.title}</div>
+        {film.rating && (
+          <div style={{ fontSize: '11px', color: '#555', letterSpacing: '1px' }}>
+            {'★'.repeat(film.rating)}{'☆'.repeat(5 - film.rating)}
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
+
+function ReviewCard({ review }: { review: ReviewEntry }) {
+  return (
+    <div style={{ display: 'flex', gap: '16px', padding: '18px 0', borderBottom: '1px solid #0f0f0f' }}>
+      {review.poster_path && (
+        <div style={{ width: '48px', flexShrink: 0 }}>
+          <div style={{ position: 'relative', aspectRatio: '2/3', borderRadius: '2px', overflow: 'hidden', background: '#111' }}>
+            <Image src={posterUrl(review.poster_path, 'w185')} alt={review.film_title || ''} fill style={{ objectFit: 'cover' }} unoptimized />
+          </div>
         </div>
       )}
       <div style={{ flex: 1 }}>
-        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: '6px' }}>
           <div>
-            <span style={{ fontSize: '10px', color: '#555', letterSpacing: '0.1em', textTransform: 'uppercase' }}>{typeLabel[item.type]}</span>
-            <div style={{ fontFamily: 'var(--font-display)', fontSize: '15px', color: '#e0d8c8', marginTop: '2px' }}>{item.title}</div>
+            <div style={{ fontFamily: 'var(--font-display)', fontSize: '16px', color: '#e2d9c8' }}>{review.film_title}</div>
+            {review.rating && (
+              <div style={{ fontSize: '11px', color: '#555', marginTop: '3px', letterSpacing: '1px' }}>
+                {'★'.repeat(review.rating)}{'☆'.repeat(5 - review.rating)}
+              </div>
+            )}
           </div>
-          <div style={{ fontSize: '10px', color: '#444', letterSpacing: '0.05em', flexShrink: 0, marginLeft: '12px' }}>
-            {formatDate(item.date)}
+          <div style={{ fontSize: '10px', color: '#333', letterSpacing: '0.05em', flexShrink: 0, marginLeft: '16px' }}>
+            {formatDate(review.created_at)}
           </div>
         </div>
-        {item.body && (
-          <p style={{ fontFamily: 'var(--font-display)', fontSize: '13px', color: '#888', marginTop: '6px', lineHeight: '1.6' }}>
-            {item.body.slice(0, 120)}{item.body.length > 120 ? '...' : ''}
-          </p>
+        {review.title && (
+          <div style={{ fontSize: '13px', color: '#999', marginBottom: '6px', fontStyle: 'italic' }}>{review.title}</div>
         )}
+        <p style={{ fontSize: '13px', color: '#666', lineHeight: '1.7', margin: 0 }}>
+          {review.body.slice(0, 220)}{review.body.length > 220 ? '...' : ''}
+        </p>
       </div>
     </div>
   );
@@ -472,18 +517,18 @@ function ActivityRow({ item, formatDate }: { item: any; formatDate: (d: string) 
 
 function UserRow({ username, displayName }: { username: string; displayName: string }) {
   return (
-    <a href={`/user/${username}`} style={{ display: 'flex', alignItems: 'center', gap: '10px', padding: '8px 0', textDecoration: 'none' }}>
-      <div style={{ width: '32px', height: '32px', borderRadius: '50%', background: '#1a1a1a', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: '12px', color: '#666' }}>
+    <a href={`/user/${username}`} style={{ display: 'flex', alignItems: 'center', gap: '10px', padding: '7px 0', textDecoration: 'none' }}>
+      <div style={{ width: '28px', height: '28px', borderRadius: '50%', background: '#111', border: '1px solid #1a1a1a', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: '11px', color: '#444', flexShrink: 0 }}>
         {username?.[0]?.toUpperCase()}
       </div>
       <div>
-        <div style={{ fontSize: '13px', color: '#ccc' }}>{displayName || username}</div>
-        <div style={{ fontSize: '10px', color: '#555' }}>@{username}</div>
+        <div style={{ fontSize: '13px', color: '#bbb' }}>{displayName || username}</div>
+        <div style={{ fontSize: '10px', color: '#444' }}>@{username}</div>
       </div>
     </a>
   );
 }
 
-function Empty({ text }: { text: string }) {
-  return <div style={{ fontSize: '12px', color: '#444', letterSpacing: '0.15em', padding: '40px 0' }}>{text}</div>;
+function EmptyState({ text }: { text: string }) {
+  return <div style={{ fontSize: '12px', color: '#2e2e2e', letterSpacing: '0.15em', padding: '48px 0' }}>{text}</div>;
 }
