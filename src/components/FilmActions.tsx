@@ -107,6 +107,7 @@ export default function FilmActions({ movie, onAuthRequired }: Props) {
     await supabase.from('reviews').upsert({
       user_id: user.id, tmdb_id: tmdbId, media_type: mediaType,
       title: reviewTitle || null, body: reviewBody, contains_spoilers: spoiler,
+      created_at: new Date().toISOString(),
       updated_at: new Date().toISOString(),
     }, { onConflict: 'user_id,tmdb_id' });
     setSubmitting(false);
