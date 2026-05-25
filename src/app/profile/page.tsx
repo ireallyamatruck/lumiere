@@ -58,7 +58,7 @@ export default function ProfilePage() {
     if (!user || !profile) return;
     setBioInput(profile.bio || '');
     loadAll();
-  }, [user?.id]);
+  }, [user?.id, profile?.id]);
 
   const fetchTmdb = useCallback(async (tmdb_id: number, media_type = 'movie') => {
     if (tmdbCache.current[tmdb_id]) return tmdbCache.current[tmdb_id];

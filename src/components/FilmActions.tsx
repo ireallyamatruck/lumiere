@@ -56,6 +56,7 @@ export default function FilmActions({ movie, onAuthRequired }: Props) {
   const [submitting, setSubmitting] = useState(false);
   const [newListName, setNewListName] = useState('');
   const [listCreated, setListCreated] = useState(false);
+  const [lastAdded, setLastAdded] = useState<string | null>(null);
   const [hoveredAction, setHoveredAction] = useState<string | null>(null);
 
   useEffect(() => {
@@ -120,6 +121,8 @@ export default function FilmActions({ movie, onAuthRequired }: Props) {
     } else {
       await supabase.from('watchlist_items').insert({ watchlist_id: wlId, tmdb_id: tmdbId, media_type: mediaType });
       setInWatchlists(prev => new Set([...prev, wlId]));
+      setLastAdded(wlId);
+      setTimeout(() => setLastAdded(null), 2000);
     }
   };
 
@@ -180,9 +183,12 @@ export default function FilmActions({ movie, onAuthRequired }: Props) {
               <span style={{ fontSize: '14px', color: inWatchlists.has(wl.id) ? '#f0ebe0' : '#2a2a2a', transition: 'color 0.2s' }}>
                 {inWatchlists.has(wl.id) ? '◼' : '◻'}
               </span>
-              <span style={{ fontSize: '12px', color: inWatchlists.has(wl.id) ? '#e2d9c8' : '#666', transition: 'color 0.2s' }}>
+              <span style={{ fontSize: '12px', color: inWatchlists.has(wl.id) ? '#e2d9c8' : '#666', transition: 'color 0.2s', flex: 1 }}>
                 {wl.name}
               </span>
+              {lastAdded === wl.id && (
+                <span style={{ fontSize: '10px', color: '#6aab6a', letterSpacing: '0.1em', transition: 'opacity 0.3s' }}>added</span>
+              )}
             </button>
           ))}
           <div style={{ display: 'flex', gap: '8px', marginTop: '10px' }}>
