@@ -71,6 +71,7 @@ export default function Home() {
 
   const colorizedRef = useRef<Set<number>>(new Set());
   const idSetRef = useRef<Set<number>>(new Set());
+  const fromCacheRef = useRef(false);
 
   // Restore mode from session or show overlay
   useEffect(() => {
@@ -153,6 +154,7 @@ export default function Home() {
     setAllMovies([]); setDisplayed([]); setFilterActive(false);
     setExtractCount(0); setTotalCount(0);
     colorizedRef.current = new Set(); idSetRef.current = new Set();
+    fromCacheRef.current = false;
     try {
       // Try Supabase cache first — instant when warm
       const cacheRes = await fetch(`/api/movies?type=${type}`);
@@ -164,12 +166,12 @@ export default function Home() {
           genreList.forEach((g: any) => { genreMap[g.id] = g.name; });
           setGenres(genreMap);
           cached.forEach((m: Movie) => idSetRef.current.add(m.id));
+          fromCacheRef.current = true;
           setAllMovies(cached); setDisplayed(cached); setTotalCount(cached.length);
           setLoading(false);
-          // Only colorize movies that don't have cached colours yet
           const needsColor = cached.filter((m: Movie) => m.dominantColor === undefined);
           if (needsColor.length > 0) colorizeMovies(needsColor, colorMode);
-          return; // skip fetchMorePages — cache already has all ~4000 movies
+          return;
         }
       }
     } catch { /* fall through to TMDB */ }
@@ -193,7 +195,7 @@ export default function Home() {
   }, [allMovies.length, loading, colorMode]);
 
   useEffect(() => {
-    if (loading || bgLoading) return;
+    if (loading || bgLoading || fromCacheRef.current) return;
     setBgLoading(true);
     fetchMorePages(mediaType, sort, 51, 400, idSetRef.current, (batch) => {
       setAllMovies(prev => {

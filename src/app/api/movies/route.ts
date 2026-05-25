@@ -94,24 +94,50 @@ export async function GET(req: NextRequest) {
     .gt('cached_at', cutoff);
 
   if (count && count > 0) {
-    // Return from cache — paginate if needed (Supabase default limit is 1000)
-    const movies: Movie[] = [];
     const PAGE_SIZE = 1000;
-    let from = 0;
-    while (true) {
-      const { data } = await supabaseAdmin
-        .from('movies_cache')
-        .select('*')
-        .eq('media_type', type)
-        .gt('cached_at', cutoff)
-        .order('popularity_rank', { ascending: true })
-        .range(from, from + PAGE_SIZE - 1);
-      if (!data || data.length === 0) break;
-      movies.push(...data.map(rowToMovie));
-      if (data.length < PAGE_SIZE) break;
-      from += PAGE_SIZE;
-    }
-    return NextResponse.json({ movies, fromCache: true });
+    const pageCount = Math.ceil(count / PAGE_SIZE);
+    const pages = await Promise.all(
+      Array.from({ length: pageCount }, (_, i) =>
+        supabaseAdmin
+          .from('movies_cache')
+          .select('*')
+          .eq('media_type', type)
+          .gt('cached_at', cutoff)
+          .order('popularity_rank', { ascending: true })
+          .range(i * PAGE_SIZE, (i + 1) * PAGE_SIZE - 1)
+      )
+    );
+    const movies = pages.flatMap(({ data }) => (data || []).map(rowToMovie));
+
+    // Merge color data from color_cache so discovery mode works immediately
+    const posterPaths = movies.map(m => m.poster_path).filter(Boolean) as string[];
+    const COLOR_BATCH = 500;
+    const colorBatches = await Promise.all(
+      Array.from({ length: Math.ceil(posterPaths.length / COLOR_BATCH) }, (_, i) =>
+        supabaseAdmin
+          .from('color_cache')
+          .select('path, dominant, palette, hue, saturation, lightness')
+          .in('path', posterPaths.slice(i * COLOR_BATCH, (i + 1) * COLOR_BATCH))
+      )
+    );
+    const colorMap = new Map<string, any>();
+    colorBatches.forEach(({ data }) => data?.forEach(c => colorMap.set(c.path, c)));
+    movies.forEach(m => {
+      if (!m.poster_path) return;
+      const c = colorMap.get(m.poster_path);
+      if (c) {
+        m.dominantColor = c.dominant;
+        m.palette = c.palette;
+        m.colorHue = c.hue;
+        m.colorSat = c.saturation;
+        m.colorLit = c.lightness;
+      }
+    });
+
+    return NextResponse.json(
+      { movies, fromCache: true },
+      { headers: { 'Cache-Control': 'public, s-maxage=1800, stale-while-revalidate=3600' } }
+    );
   }
 
   // Cache miss — fetch from TMDB and store

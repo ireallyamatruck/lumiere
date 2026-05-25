@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { supabaseAdmin } from '@/lib/supabase-admin';
 
-export const maxDuration = 60;
+export const maxDuration = 300;
 
 const TMDB_BASE = 'https://api.themoviedb.org/3';
 const API_KEY = process.env.NEXT_PUBLIC_TMDB_API_KEY!;
@@ -23,8 +23,8 @@ export async function GET(req: NextRequest) {
   }
 
   const type = req.nextUrl.searchParams.get('type') || 'movie';
-  const PAGES = 200;
-  const CHUNK = 20;
+  const PAGES = 500;
+  const CHUNK = 25;
   const all: any[] = [];
   const seen = new Set<number>();
 
