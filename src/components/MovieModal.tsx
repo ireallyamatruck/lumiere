@@ -18,8 +18,12 @@ interface Props {
 export default function MovieModal({ movie, genres, onClose, onAuthRequired, readOnly }: Props) {
   const { user } = useAuth();
   const [reviews, setReviews] = useState<Review[]>([]);
+  const [reviewLikes, setReviewLikes] = useState<Record<string, number>>({});
+  const [userLikedReviews, setUserLikedReviews] = useState<Set<string>>(new Set());
   const [reviewComment, setReviewComment] = useState<Record<string, string>>({});
   const [submittingComment, setSubmittingComment] = useState<string | null>(null);
+  const [rtRating, setRtRating] = useState<string | null>(null);
+  const [showReviews, setShowReviews] = useState(false);
 
   useEffect(() => {
     const handler = (e: KeyboardEvent) => { if (e.key === 'Escape') onClose(); };
@@ -33,14 +37,62 @@ export default function MovieModal({ movie, genres, onClose, onAuthRequired, rea
   }, [movie]);
 
   useEffect(() => {
-    if (!movie) return;
+    if (!movie) { setReviews([]); setRtRating(null); setShowReviews(false); return; }
+
+    // Fetch reviews
     supabase
       .from('reviews')
       .select('*, profiles(username, display_name, avatar_url)')
       .eq('tmdb_id', movie.id)
       .order('created_at', { ascending: false })
-      .then(({ data }) => setReviews(data || []));
-  }, [movie?.id]);
+      .then(async ({ data }) => {
+        const revs = data || [];
+        setReviews(revs);
+
+        if (revs.length === 0) return;
+        const ids = revs.map((r: any) => r.id);
+
+        // Fetch like counts
+        const { data: likes } = await supabase
+          .from('review_likes')
+          .select('review_id')
+          .in('review_id', ids);
+        const counts: Record<string, number> = {};
+        (likes || []).forEach((l: any) => { counts[l.review_id] = (counts[l.review_id] || 0) + 1; });
+        setReviewLikes(counts);
+
+        // Fetch which ones the current user liked
+        if (user) {
+          const { data: myLikes } = await supabase
+            .from('review_likes')
+            .select('review_id')
+            .in('review_id', ids)
+            .eq('user_id', user.id);
+          setUserLikedReviews(new Set((myLikes || []).map((l: any) => l.review_id)));
+        }
+      });
+
+    // Fetch RT rating
+    const type = movie.title ? 'movie' : 'tv';
+    fetch(`/api/ratings?tmdb_id=${movie.id}&type=${type}`)
+      .then(r => r.json())
+      .then(d => { if (d.rt) setRtRating(d.rt); })
+      .catch(() => {});
+  }, [movie?.id, user?.id]);
+
+  const toggleReviewLike = async (reviewId: string) => {
+    if (!user) { onAuthRequired(); return; }
+    const isLiked = userLikedReviews.has(reviewId);
+    if (isLiked) {
+      await supabase.from('review_likes').delete().eq('review_id', reviewId).eq('user_id', user.id);
+      setUserLikedReviews(prev => { const s = new Set(prev); s.delete(reviewId); return s; });
+      setReviewLikes(prev => ({ ...prev, [reviewId]: Math.max(0, (prev[reviewId] || 1) - 1) }));
+    } else {
+      await supabase.from('review_likes').insert({ review_id: reviewId, user_id: user.id });
+      setUserLikedReviews(prev => new Set([...prev, reviewId]));
+      setReviewLikes(prev => ({ ...prev, [reviewId]: (prev[reviewId] || 0) + 1 }));
+    }
+  };
 
   const submitComment = async (reviewId: string) => {
     if (!user || !reviewComment[reviewId]?.trim()) return;
@@ -58,6 +110,13 @@ export default function MovieModal({ movie, genres, onClose, onAuthRequired, rea
   const year = getYear(movie);
   const movieGenres = (movie.genre_ids || []).map(id => genres[id]).filter(Boolean);
   const palette = movie.palette || [];
+
+  // Sort reviews: own first, then by like count
+  const sortedReviews = [...reviews].sort((a: any, b: any) => {
+    if (a.user_id === user?.id) return -1;
+    if (b.user_id === user?.id) return 1;
+    return (reviewLikes[b.id] || 0) - (reviewLikes[a.id] || 0);
+  });
 
   return (
     <div
@@ -89,12 +148,24 @@ export default function MovieModal({ movie, genres, onClose, onAuthRequired, rea
             </div>
 
             {/* Meta row */}
-            <div className="flex items-center gap-3 mb-4" style={{ fontSize: '13px', color: '#999', letterSpacing: '0.1em' }}>
+            <div className="flex items-center gap-3 mb-4" style={{ fontSize: '13px', color: '#999', letterSpacing: '0.1em', flexWrap: 'wrap' }}>
               <span>{year}</span>
               {movie.vote_average > 0 && (
                 <>
                   <span style={{ color: '#444' }}>·</span>
-                  <span style={{ color: '#ccc' }}>{movie.vote_average.toFixed(1)} imdb</span>
+                  <span style={{ display: 'flex', alignItems: 'center', gap: '5px' }}>
+                    <span style={{ background: '#F5C518', color: '#000', fontSize: '9px', fontWeight: 800, padding: '1px 5px', borderRadius: '2px', letterSpacing: '0.03em', lineHeight: '14px' }}>IMDb</span>
+                    <span style={{ color: '#ccc' }}>{movie.vote_average.toFixed(1)}</span>
+                  </span>
+                </>
+              )}
+              {rtRating && (
+                <>
+                  <span style={{ color: '#444' }}>·</span>
+                  <span style={{ display: 'flex', alignItems: 'center', gap: '5px' }}>
+                    <span style={{ background: '#FA320A', color: '#fff', fontSize: '9px', fontWeight: 800, padding: '1px 5px', borderRadius: '2px', letterSpacing: '0.03em', lineHeight: '14px' }}>RT</span>
+                    <span style={{ color: '#ccc' }}>{rtRating}</span>
+                  </span>
                 </>
               )}
             </div>
@@ -130,16 +201,34 @@ export default function MovieModal({ movie, genres, onClose, onAuthRequired, rea
           {/* Film actions */}
           {!readOnly && <FilmActions movie={movie} onAuthRequired={onAuthRequired} />}
 
-          {/* Reviews */}
-          {reviews.length > 0 && (
+          {/* View Reviews toggle */}
+          {!readOnly && (
+            <div className="px-6 pb-2">
+              <button
+                onClick={() => setShowReviews(s => !s)}
+                style={{ fontSize: '11px', letterSpacing: '0.2em', textTransform: 'uppercase', color: showReviews ? '#e2d9c8' : '#444', background: 'none', border: '1px solid #1e1e1e', borderRadius: '3px', padding: '7px 16px', cursor: 'pointer', transition: 'all 0.2s', width: '100%' }}
+                onMouseEnter={e => { e.currentTarget.style.borderColor = '#444'; e.currentTarget.style.color = '#e2d9c8'; }}
+                onMouseLeave={e => { if (!showReviews) { e.currentTarget.style.borderColor = '#1e1e1e'; e.currentTarget.style.color = '#444'; } }}
+              >
+                {showReviews ? 'hide reviews' : `view reviews${reviews.length > 0 ? ` · ${reviews.length}` : ''}`}
+              </button>
+            </div>
+          )}
+
+          {/* Reviews section */}
+          {(showReviews || readOnly) && sortedReviews.length > 0 && (
             <div className="px-6 pb-6 border-t pt-4" style={{ borderColor: '#1a1a1a' }}>
-              <div style={{ fontSize: '11px', letterSpacing: '0.25em', textTransform: 'uppercase', color: '#888', marginBottom: '16px' }}>
+              <div style={{ fontSize: '11px', letterSpacing: '0.25em', textTransform: 'uppercase', color: '#555', marginBottom: '16px' }}>
                 reviews
               </div>
-              {reviews.map(review => (
+              {sortedReviews.map((review: any) => (
                 <ReviewCard
                   key={review.id}
                   review={review}
+                  isOwn={review.user_id === user?.id}
+                  likeCount={reviewLikes[review.id] || 0}
+                  liked={userLikedReviews.has(review.id)}
+                  onLike={() => toggleReviewLike(review.id)}
                   commentValue={reviewComment[review.id] || ''}
                   onCommentChange={v => setReviewComment(prev => ({ ...prev, [review.id]: v }))}
                   onCommentSubmit={() => submitComment(review.id)}
@@ -166,8 +255,8 @@ export default function MovieModal({ movie, genres, onClose, onAuthRequired, rea
   );
 }
 
-function ReviewCard({ review, commentValue, onCommentChange, onCommentSubmit, submitting, user, onAuthRequired }:
-  { review: Review; commentValue: string; onCommentChange: (v: string) => void; onCommentSubmit: () => void; submitting: boolean; user: any; onAuthRequired: () => void }) {
+function ReviewCard({ review, isOwn, likeCount, liked, onLike, commentValue, onCommentChange, onCommentSubmit, submitting, user, onAuthRequired }:
+  { review: any; isOwn: boolean; likeCount: number; liked: boolean; onLike: () => void; commentValue: string; onCommentChange: (v: string) => void; onCommentSubmit: () => void; submitting: boolean; user: any; onAuthRequired: () => void }) {
   const [showComments, setShowComments] = useState(false);
   const [comments, setComments] = useState<any[]>([]);
 
@@ -187,7 +276,8 @@ function ReviewCard({ review, commentValue, onCommentChange, onCommentSubmit, su
         <div style={{ width: '22px', height: '22px', borderRadius: '50%', background: '#222', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: '10px', color: '#888' }}>
           {review.profiles?.username?.[0]?.toUpperCase()}
         </div>
-        <span style={{ fontSize: '12px', color: '#aaa', letterSpacing: '0.05em' }}>{review.profiles?.username}</span>
+        <span style={{ fontSize: '12px', color: isOwn ? '#e2d9c8' : '#aaa', letterSpacing: '0.05em' }}>{review.profiles?.username}</span>
+        {isOwn && <span style={{ fontSize: '9px', color: '#555', letterSpacing: '0.1em', textTransform: 'uppercase' }}>you</span>}
         {review.contains_spoilers && (
           <span style={{ fontSize: '9px', letterSpacing: '0.1em', textTransform: 'uppercase', border: '1px solid #333', color: '#666', padding: '1px 5px' }}>spoiler</span>
         )}
@@ -197,11 +287,22 @@ function ReviewCard({ review, commentValue, onCommentChange, onCommentSubmit, su
       )}
       <p className="font-display font-light leading-relaxed" style={{ fontFamily: 'var(--font-display)', fontSize: '14px', color: '#bbb' }}>{review.body}</p>
 
-      <button onClick={loadComments} style={{ marginTop: '8px', fontSize: '10px', letterSpacing: '0.15em', textTransform: 'uppercase', color: '#666', background: 'none', border: 'none', cursor: 'pointer' }}
-        onMouseEnter={e => (e.target as HTMLElement).style.color = '#aaa'}
-        onMouseLeave={e => (e.target as HTMLElement).style.color = '#666'}>
-        {showComments ? 'hide comments' : 'comments'}
-      </button>
+      {/* Like + comments row */}
+      <div style={{ display: 'flex', alignItems: 'center', gap: '16px', marginTop: '10px' }}>
+        <button onClick={onLike}
+          style={{ display: 'flex', alignItems: 'center', gap: '5px', fontSize: '11px', color: liked ? '#e2d9c8' : '#444', background: 'none', border: 'none', cursor: 'pointer', transition: 'color 0.2s', letterSpacing: '0.1em' }}
+          onMouseEnter={e => { e.currentTarget.style.color = '#e2d9c8'; }}
+          onMouseLeave={e => { if (!liked) e.currentTarget.style.color = '#444'; }}>
+          <span style={{ fontSize: '13px' }}>{liked ? '♥' : '♡'}</span>
+          {likeCount > 0 && <span>{likeCount}</span>}
+        </button>
+        <button onClick={loadComments}
+          style={{ fontSize: '10px', letterSpacing: '0.15em', textTransform: 'uppercase', color: '#444', background: 'none', border: 'none', cursor: 'pointer', transition: 'color 0.2s' }}
+          onMouseEnter={e => (e.currentTarget.style.color = '#aaa')}
+          onMouseLeave={e => (e.currentTarget.style.color = '#444')}>
+          {showComments ? 'hide' : 'comments'}
+        </button>
+      </div>
 
       {showComments && (
         <div className="mt-3 pl-3" style={{ borderLeft: '1px solid #1e1e1e' }}>

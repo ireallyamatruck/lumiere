@@ -173,12 +173,14 @@ export default function ProfilePage() {
       );
       setReviews(reviewsEnriched);
 
-      // Build activity feed
-      const acts: ActivityItem[] = [
-        ...(watched || []).slice(0, 15).map((w: any) => ({ type: 'watched' as const, tmdb_id: w.tmdb_id, media_type: w.media_type, date: w.watched_at, rating: rMap[w.tmdb_id] })),
-        ...(likedData || []).slice(0, 10).map((l: any) => ({ type: 'liked' as const, tmdb_id: l.tmdb_id, media_type: l.media_type, date: l.created_at })),
-        ...(reviewData || []).slice(0, 10).map((r: any) => ({ type: 'reviewed' as const, tmdb_id: r.tmdb_id, media_type: r.media_type, date: r.created_at, body: r.body })),
-      ].sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime()).slice(0, 20);
+      // Build activity feed — deduplicated by tmdb_id (reviewed > liked > watched priority)
+      const allActs: ActivityItem[] = [
+        ...(reviewData || []).slice(0, 20).map((r: any) => ({ type: 'reviewed' as const, tmdb_id: r.tmdb_id, media_type: r.media_type, date: r.created_at || new Date().toISOString(), body: r.body })),
+        ...(likedData || []).slice(0, 20).map((l: any) => ({ type: 'liked' as const, tmdb_id: l.tmdb_id, media_type: l.media_type, date: l.created_at })),
+        ...(watched || []).slice(0, 20).map((w: any) => ({ type: 'watched' as const, tmdb_id: w.tmdb_id, media_type: w.media_type, date: w.watched_at, rating: rMap[w.tmdb_id] })),
+      ].sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime());
+      const seenAct = new Set<number>();
+      const acts = allActs.filter(a => { if (seenAct.has(a.tmdb_id)) return false; seenAct.add(a.tmdb_id); return true; }).slice(0, 20);
 
       const actsEnriched = await Promise.all(acts.map(async a => {
         try {
@@ -571,8 +573,18 @@ function FavoriteSlotCard({ slot, onAdd, onRemove }: { slot: FavoriteSlot; onAdd
           <div style={{ position: 'absolute', inset: 0, background: 'rgba(0,0,0,0.75)', display: 'flex', flexDirection: 'column', justifyContent: 'flex-end', padding: '12px 10px', gap: '8px' }}>
             <div style={{ fontSize: '11px', color: '#e2d9c8', lineHeight: 1.3 }}>{slot.title}</div>
             <div style={{ display: 'flex', gap: '8px' }}>
-              <button onClick={onAdd} style={{ fontSize: '9px', color: '#888', background: 'none', border: '1px solid #444', borderRadius: '2px', padding: '3px 8px', cursor: 'pointer', letterSpacing: '0.1em' }}>change</button>
-              <button onClick={e => { e.stopPropagation(); onRemove(); }} style={{ fontSize: '9px', color: '#666', background: 'none', border: 'none', cursor: 'pointer', letterSpacing: '0.1em' }}>remove</button>
+              <button onClick={onAdd}
+                style={{ fontSize: '9px', color: '#aaa', background: 'none', border: '1px solid #777', borderRadius: '2px', padding: '3px 8px', cursor: 'pointer', letterSpacing: '0.1em', transition: 'all 0.15s' }}
+                onMouseEnter={e => { e.currentTarget.style.color = '#fff'; e.currentTarget.style.borderColor = '#ccc'; e.currentTarget.style.background = '#222'; }}
+                onMouseLeave={e => { e.currentTarget.style.color = '#aaa'; e.currentTarget.style.borderColor = '#777'; e.currentTarget.style.background = 'none'; }}>
+                change
+              </button>
+              <button onClick={e => { e.stopPropagation(); onRemove(); }}
+                style={{ fontSize: '9px', color: '#888', background: 'none', border: 'none', cursor: 'pointer', letterSpacing: '0.1em', transition: 'color 0.15s' }}
+                onMouseEnter={e => { e.currentTarget.style.color = '#ff6b6b'; }}
+                onMouseLeave={e => { e.currentTarget.style.color = '#888'; }}>
+                remove
+              </button>
             </div>
           </div>
         )}
@@ -607,8 +619,12 @@ function FilmTile({ film, onClick }: { film: FilmEntry; onClick?: () => void }) 
 
 function ActivityRow({ item, onClick }: { item: ActivityItem; onClick?: () => void }) {
   const label = { watched: 'watched', liked: 'liked', reviewed: 'reviewed' }[item.type];
+  const [hovered, setHovered] = useState(false);
   return (
-    <div onClick={onClick} style={{ display: 'flex', gap: '14px', padding: '11px 0', borderBottom: '1px solid #0a0a0a', alignItems: 'flex-start', cursor: onClick ? 'pointer' : 'default' }}>
+    <div onClick={onClick}
+      onMouseEnter={() => setHovered(true)}
+      onMouseLeave={() => setHovered(false)}
+      style={{ display: 'flex', gap: '14px', padding: '11px 8px', borderBottom: '1px solid #0a0a0a', alignItems: 'flex-start', cursor: onClick ? 'pointer' : 'default', borderRadius: '4px', background: hovered ? '#0c0c0c' : 'transparent', transform: hovered ? 'scale(1.01)' : 'scale(1)', transition: 'all 0.15s ease', margin: '0 -8px' }}>
       {item.poster_path ? (
         <div style={{ width: '34px', flexShrink: 0 }}>
           <div style={{ position: 'relative', aspectRatio: '2/3', borderRadius: '2px', overflow: 'hidden', background: '#111' }}>
