@@ -807,13 +807,17 @@ function ListItemGrid({ items, fetchTmdb, onFilmClick }: { items: { tmdb_id: num
 function UserCircle({ profile }: { profile: any }) {
   if (!profile) return null;
   return (
-    <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '8px', width: '72px' }}>
-      <div style={{ width: '52px', height: '52px', borderRadius: '50%', background: '#1a1a1a', border: '1px solid #2a2a2a', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: '20px', color: '#555', fontFamily: 'var(--font-display)', fontWeight: 300, transition: 'border-color 0.2s', cursor: 'default' }}
-        onMouseEnter={e => (e.currentTarget.style.borderColor = '#555')}
+    <a href={`/profile/${profile?.username}`} style={{ textDecoration: 'none', display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '8px', width: '72px' }}>
+      <div style={{ width: '52px', height: '52px', borderRadius: '50%', background: '#1a1a1a', border: '1px solid #2a2a2a', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: '20px', color: '#555', fontFamily: 'var(--font-display)', fontWeight: 300, transition: 'border-color 0.2s', cursor: 'pointer' }}
+        onMouseEnter={e => (e.currentTarget.style.borderColor = '#888')}
         onMouseLeave={e => (e.currentTarget.style.borderColor = '#2a2a2a')}>
         {profile?.username?.[0]?.toUpperCase()}
       </div>
-      <div style={{ fontSize: '10px', color: '#555', letterSpacing: '0.05em', textAlign: 'center', wordBreak: 'break-word' }}>{profile?.username}</div>
-    </div>
+      <div style={{ fontSize: '10px', color: '#555', letterSpacing: '0.05em', textAlign: 'center', wordBreak: 'break-word', transition: 'color 0.15s' }}
+        onMouseEnter={e => (e.currentTarget.style.color = '#aaa')}
+        onMouseLeave={e => (e.currentTarget.style.color = '#555')}>
+        {profile?.username}
+      </div>
+    </a>
   );
 }

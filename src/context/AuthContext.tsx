@@ -72,7 +72,8 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         email, password,
         options: { data: { username, display_name: username } },
       });
-      return { error: error?.message ?? null };
+      if (error) return { error: error.message || 'Signup failed — please try again.' };
+      return { error: null };
     } catch (e: any) {
       return { error: e?.message || 'Something went wrong. Please try again.' };
     }

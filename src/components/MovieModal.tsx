@@ -260,7 +260,12 @@ function ReviewCard({ review, isOwn, likeCount, liked, onLike, commentValue, onC
         <div style={{ width: '22px', height: '22px', borderRadius: '50%', background: '#222', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: '10px', color: '#888' }}>
           {review.profiles?.username?.[0]?.toUpperCase()}
         </div>
-        <span style={{ fontSize: '12px', color: isOwn ? '#e2d9c8' : '#aaa', letterSpacing: '0.05em' }}>{review.profiles?.username}</span>
+        <a
+          href={`/profile/${review.profiles?.username}`}
+          style={{ fontSize: '12px', color: isOwn ? '#e2d9c8' : '#aaa', letterSpacing: '0.05em', textDecoration: 'none', transition: 'color 0.15s' }}
+          onMouseEnter={e => { if (!isOwn) e.currentTarget.style.color = '#e2d9c8'; }}
+          onMouseLeave={e => { if (!isOwn) e.currentTarget.style.color = '#aaa'; }}
+        >{review.profiles?.username}</a>
         {isOwn && <span style={{ fontSize: '9px', color: '#555', letterSpacing: '0.1em', textTransform: 'uppercase' }}>you</span>}
         {review.contains_spoilers && (
           <span style={{ fontSize: '9px', letterSpacing: '0.1em', textTransform: 'uppercase', border: '1px solid #333', color: '#666', padding: '1px 5px' }}>spoiler</span>
