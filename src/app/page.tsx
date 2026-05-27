@@ -16,6 +16,38 @@ const SORT_OPTIONS = [
   { value: 'release_date.desc', label: 'recent' },
 ];
 
+// Derive HSL from a hex colour string — O(1), no network call needed
+function hexToHsl(hex: string): { h: number; s: number; l: number } | null {
+  const m = /^#?([a-f\d]{2})([a-f\d]{2})([a-f\d]{2})$/i.exec(hex);
+  if (!m) return null;
+  let r = parseInt(m[1], 16) / 255;
+  let g = parseInt(m[2], 16) / 255;
+  let b = parseInt(m[3], 16) / 255;
+  const max = Math.max(r, g, b), min = Math.min(r, g, b);
+  const l = (max + min) / 2;
+  if (max === min) return { h: 0, s: 0, l: l * 100 };
+  const d = max - min;
+  const s = l > 0.5 ? d / (2 - max - min) : d / (max + min);
+  let h: number;
+  switch (max) {
+    case r: h = ((g - b) / d + (g < b ? 6 : 0)) / 6; break;
+    case g: h = ((b - r) / d + 2) / 6; break;
+    default: h = ((r - g) / d + 4) / 6;
+  }
+  return { h: h * 360, s: s * 100, l: l * 100 };
+}
+
+// Fill in missing colorHue/Sat/Lit from dominantColor so cosmos shows instantly
+function enrichColours(movies: Movie[]): Movie[] {
+  movies.forEach(m => {
+    if (m.colorHue === undefined && m.dominantColor) {
+      const hsl = hexToHsl(m.dominantColor);
+      if (hsl) { m.colorHue = hsl.h; m.colorSat = hsl.s; m.colorLit = hsl.l; }
+    }
+  });
+  return movies;
+}
+
 function sortMovies(movies: Movie[], sortBy: string): Movie[] {
   if (sortBy === 'vote_average.desc') {
     return [...movies].sort((a, b) => (b.vote_average || 0) - (a.vote_average || 0));
@@ -158,6 +190,7 @@ export default function Home() {
           }
           colorizedRef.current.add(movie.id);
         });
+        enrichColours(batch);
         setExtractCount(prev => prev + batch.length);
         setAllMovies(prev => [...prev]);
       } catch { batch.forEach(m => colorizedRef.current.add(m.id)); }
@@ -182,7 +215,7 @@ export default function Home() {
           setGenres(genreMap);
           cached.forEach((m: Movie) => idSetRef.current.add(m.id));
           fromCacheRef.current = true;
-          const sorted = sortMovies(cached, sortBy);
+          const sorted = enrichColours(sortMovies(cached, sortBy));
           setAllMovies(sorted); setDisplayed(sorted); setTotalCount(sorted.length);
           setLoading(false);
           const needsColor = cached.filter((m: Movie) => m.dominantColor === undefined);
@@ -199,6 +232,7 @@ export default function Home() {
       genreList.forEach(g => { genreMap[g.id] = g.name; });
       setGenres(genreMap);
       results.forEach(m => idSetRef.current.add(m.id));
+      enrichColours(results);
       setAllMovies(results); setDisplayed(results); setTotalCount(results.length);
     } catch { setAllMovies([]); setDisplayed([]); }
     setLoading(false);

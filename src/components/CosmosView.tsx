@@ -22,6 +22,7 @@ export default function CosmosView({ movies, onSelect, activeHue }: Props) {
   const [hoveredId, setHoveredId] = useState<number | null>(null);
   const [dimensions, setDimensions] = useState({ width: 1200, height: 700 });
   const [zoom, setZoom] = useState(1);
+  const layoutTimer = useRef<ReturnType<typeof setTimeout>>();
 
   useEffect(() => {
     const update = () => {
@@ -38,46 +39,35 @@ export default function CosmosView({ movies, onSelect, activeHue }: Props) {
   }, []);
 
   useEffect(() => {
-    const colorized = movies.filter(m => m.colorHue !== undefined);
-    if (!colorized.length) return;
+    // Debounce: skip intermediate renders while movies are still streaming in
+    clearTimeout(layoutTimer.current);
+    layoutTimer.current = setTimeout(() => {
+      const colorized = movies.filter(m => m.colorHue !== undefined);
+      if (!colorized.length) return;
 
-    const { width, height } = dimensions;
-    const PAD = 40;
-    const W = width - PAD * 2;
-    const H = height - PAD * 2;
+      const { width, height } = dimensions;
+      const PAD = 40;
+      const W = width - PAD * 2;
+      const H = height - PAD * 2;
 
-    const newPlaced: PlacedMovie[] = colorized.map(movie => {
-      const hueNorm = (movie.colorHue! / 360);
-      const satNorm = (movie.colorSat ?? 50) / 100;
-      const litNorm = (movie.colorLit ?? 50) / 100;
+      // O(n) layout — no quadratic spread for large datasets
+      const newPlaced: PlacedMovie[] = colorized.map(movie => {
+        const hueNorm = movie.colorHue! / 360;
+        const satNorm = (movie.colorSat ?? 50) / 100;
+        const litNorm = (movie.colorLit ?? 50) / 100;
 
-      const x = (PAD + hueNorm * W) * zoom;
-      const y = (PAD + (1 - (satNorm * 0.6 + litNorm * 0.4)) * H) * zoom;
+        // Add tiny deterministic jitter so same-hue movies don't stack exactly
+        const jitter = ((movie.id * 2654435761) >>> 0) / 0xffffffff;
+        const x = (PAD + hueNorm * W + (jitter - 0.5) * 8) * zoom;
+        const y = (PAD + (1 - (satNorm * 0.6 + litNorm * 0.4)) * H + (jitter - 0.5) * 8) * zoom;
 
-      return { movie, x, y, size: 44 * zoom };
-    });
+        return { movie, x, y, size: 44 * zoom };
+      });
 
-    // Spread overlapping posters slightly
-    for (let iter = 0; iter < 3; iter++) {
-      for (let i = 0; i < newPlaced.length; i++) {
-        for (let j = i + 1; j < newPlaced.length; j++) {
-          const a = newPlaced[i], b = newPlaced[j];
-          const dx = b.x - a.x, dy = b.y - a.y;
-          const dist = Math.sqrt(dx * dx + dy * dy);
-          const minDist = (a.size + b.size) / 2 + 4;
-          if (dist < minDist && dist > 0) {
-            const push = (minDist - dist) / 2;
-            const nx = dx / dist, ny = dy / dist;
-            newPlaced[i].x -= nx * push * 0.5;
-            newPlaced[i].y -= ny * push * 0.5;
-            newPlaced[j].x += nx * push * 0.5;
-            newPlaced[j].y += ny * push * 0.5;
-          }
-        }
-      }
-    }
+      setPlaced(newPlaced);
+    }, 80);
 
-    setPlaced(newPlaced);
+    return () => clearTimeout(layoutTimer.current);
   }, [movies, dimensions, zoom]);
 
   const hueDist = (a: number, b: number) => {
