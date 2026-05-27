@@ -110,20 +110,20 @@ export default function MovieModal({ movie, genres, onClose, onAuthRequired, rea
     >
       <div
         className="relative flex flex-col md:flex-row w-full max-w-[640px] my-8 animate-fade-up"
-        style={{ background: '#0d0d0d', border: '1px solid #2a2a2a', borderRadius: '6px', opacity: 0 }}
+        style={{ background: '#0d0d0d', border: '1px solid #2a2a2a', borderRadius: '6px', opacity: 0, height: 'min(88vh, 660px)' }}
       >
-        {/* Poster */}
+        {/* Poster — fixed size, never stretches */}
         {movie.poster_path && (
-          <div className="relative w-full md:w-[200px] flex-shrink-0" style={{ aspectRatio: '2/3', minHeight: '200px' }}>
-            <Image src={posterUrl(movie.poster_path, 'w342')} alt={title} fill className="object-cover rounded-tl-md rounded-bl-md" unoptimized />
+          <div className="hidden md:block flex-shrink-0" style={{ width: '200px', height: '100%', position: 'relative', borderRadius: '6px 0 0 6px', overflow: 'hidden' }}>
+            <Image src={posterUrl(movie.poster_path, 'w342')} alt={title} fill className="object-cover" unoptimized />
             {movie.dominantColor && (
-              <div className="absolute bottom-0 left-0 right-0 h-1 rounded-bl-md" style={{ background: movie.dominantColor, opacity: 0.9 }} />
+              <div className="absolute bottom-0 left-0 right-0 h-1" style={{ background: movie.dominantColor, opacity: 0.9 }} />
             )}
           </div>
         )}
 
-        {/* Content */}
-        <div className="flex flex-col flex-1 overflow-y-auto" style={{ maxHeight: '85vh' }}>
+        {/* Content — scrolls internally, modal stays fixed */}
+        <div className="flex flex-col flex-1 overflow-y-auto" style={{ minHeight: 0 }}>
           <div className="p-6">
             {/* Title */}
             <div className="font-display font-light leading-tight mb-2"

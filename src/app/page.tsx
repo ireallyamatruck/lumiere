@@ -16,6 +16,20 @@ const SORT_OPTIONS = [
   { value: 'release_date.desc', label: 'recent' },
 ];
 
+function sortMovies(movies: Movie[], sortBy: string): Movie[] {
+  if (sortBy === 'vote_average.desc') {
+    return [...movies].sort((a, b) => (b.vote_average || 0) - (a.vote_average || 0));
+  }
+  if (sortBy === 'release_date.desc') {
+    return [...movies].sort((a, b) => {
+      const da = a.release_date || a.first_air_date || '';
+      const db = b.release_date || b.first_air_date || '';
+      return db.localeCompare(da);
+    });
+  }
+  return movies; // popularity.desc — already sorted by popularity_rank in cache
+}
+
 type ViewMode = 'grid' | 'cosmos';
 type ColorMode = 'poster' | 'cinema';
 
@@ -63,6 +77,7 @@ export default function Home() {
   const [yearMin, setYearMin] = useState(1950);
   const [yearMax, setYearMax] = useState(2025);
   const [showFilters, setShowFilters] = useState(false);
+  const [searchActive, setSearchActive] = useState(false);
 
   // Discovery mode
   const [showDiscovery, setShowDiscovery] = useState(false);
@@ -151,7 +166,7 @@ export default function Home() {
 
   const load = useCallback(async (type: 'movie' | 'tv', sortBy: string) => {
     setLoading(true);
-    setAllMovies([]); setDisplayed([]); setFilterActive(false);
+    setAllMovies([]); setDisplayed([]); setFilterActive(false); setSearchActive(false);
     setExtractCount(0); setTotalCount(0);
     colorizedRef.current = new Set(); idSetRef.current = new Set();
     fromCacheRef.current = false;
@@ -167,7 +182,8 @@ export default function Home() {
           setGenres(genreMap);
           cached.forEach((m: Movie) => idSetRef.current.add(m.id));
           fromCacheRef.current = true;
-          setAllMovies(cached); setDisplayed(cached); setTotalCount(cached.length);
+          const sorted = sortMovies(cached, sortBy);
+          setAllMovies(sorted); setDisplayed(sorted); setTotalCount(sorted.length);
           setLoading(false);
           const needsColor = cached.filter((m: Movie) => m.dominantColor === undefined);
           if (needsColor.length > 0) colorizeMovies(needsColor, colorMode);
@@ -239,6 +255,7 @@ export default function Home() {
     const { searchMovies } = await import('@/lib/tmdb');
     const results = await searchMovies(searchQuery);
     setAllMovies(results); setDisplayed(results);
+    setSearchActive(true); setFilmsRevealed(true);
     setLoading(false); setShowSearch(false);
   };
 
@@ -251,6 +268,7 @@ export default function Home() {
   };
 
   const countLabel = loading ? 'loading...'
+    : searchActive ? `${displayed.length} result${displayed.length !== 1 ? 's' : ''} for "${searchQuery}"  ·  ${totalCount} total`
     : filterActive ? `${displayed.length} matches · ${totalCount} total`
     : bgLoading ? `${totalCount} films · loading more...`
     : `${totalCount} films`;
@@ -304,6 +322,7 @@ export default function Home() {
               if (!discoveryMode) {
                 setFilmsRevealed(false);
                 setFilterActive(false);
+                setSearchActive(false);
                 setCosmosHue(null);
                 setDisplayed(allMovies);
                 setSelectedGenres(new Set());
@@ -530,7 +549,17 @@ export default function Home() {
           </div>
 
           <div className="flex items-center justify-between px-8 py-4 border-b border-[#111] mt-2">
-            <div className="text-[11px] text-neutral-600 tracking-widest">{countLabel}</div>
+            <div className="flex items-center gap-4">
+              <div className="text-[11px] text-neutral-600 tracking-widest">{countLabel}</div>
+              {filterActive && (
+                <button
+                  onClick={() => { setDisplayed(allMovies); setFilterActive(false); setCosmosHue(null); setFilmsRevealed(false); }}
+                  style={{ fontSize: '10px', letterSpacing: '0.15em', textTransform: 'uppercase', color: '#555', background: 'none', border: '1px solid #1e1e1e', borderRadius: '2px', padding: '3px 10px', cursor: 'pointer', transition: 'all 0.2s' }}
+                  onMouseEnter={e => { e.currentTarget.style.color = '#e2d9c8'; e.currentTarget.style.borderColor = '#555'; }}
+                  onMouseLeave={e => { e.currentTarget.style.color = '#555'; e.currentTarget.style.borderColor = '#1e1e1e'; }}
+                >× clear colour</button>
+              )}
+            </div>
             <div className="flex items-center gap-3">
               <select value={mediaType} onChange={e => setMediaType(e.target.value as 'movie' | 'tv')}
                 className="bg-[#070707] border border-[#1e1e1e] text-neutral-500 font-mono text-[10px] tracking-widest uppercase py-[5px] px-3 rounded-sm outline-none cursor-pointer hover:border-[#333] transition-colors appearance-none">

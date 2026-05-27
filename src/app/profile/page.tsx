@@ -17,7 +17,7 @@ const TABS: { id: Tab; label: string }[] = [
   { id: 'critiques', label: 'Critiques' },
   { id: 'favourites', label: 'Favourites' },
   { id: 'lists', label: 'Lists' },
-  { id: 'circles', label: 'Circles' },
+  { id: 'circles', label: 'Circle' },
 ];
 
 interface Stats { colors: number; palette: number; lists: number; following: number; followers: number }
@@ -56,7 +56,7 @@ export default function ProfilePage() {
   const [modalReadOnly, setModalReadOnly] = useState(false);
   const [watchedColors, setWatchedColors] = useState<string[]>([]);
   const [colorYearFilter, setColorYearFilter] = useState<number | null>(null);
-  const [circlesView, setCirclesView] = useState<'followers' | 'following'>('followers');
+  const [circlesView, setCirclesView] = useState<'followers' | 'following'>('following');
   const [watchlistsData, setWatchlistsData] = useState<WatchlistData[]>([]);
   const [expandedList, setExpandedList] = useState<string | null>(null);
   const tmdbCache = useRef<Record<number, any>>({});
@@ -598,12 +598,7 @@ export default function ProfilePage() {
                   {expandedList === wl.id ? (
                     <ListItemGrid items={wl.items} fetchTmdb={fetchTmdb} onFilmClick={(film) => openModal(film, false)} />
                   ) : (
-                    <div style={{ display: 'flex', gap: '4px' }}>
-                      {wl.items.slice(0, 8).map((item, i) => (
-                        <div key={i} style={{ width: '60px', aspectRatio: '2/3', borderRadius: '2px', background: '#111', flexShrink: 0 }} />
-                      ))}
-                      {wl.items.length === 0 && <div style={{ fontSize: '11px', color: '#222', letterSpacing: '0.1em' }}>empty</div>}
-                    </div>
+                    <ListPreviewStrip items={wl.items} fetchTmdb={fetchTmdb} />
                   )}
                 </div>
               ))
@@ -615,7 +610,7 @@ export default function ProfilePage() {
         {tab === 'circles' && (
           <div>
             <div style={{ display: 'flex', gap: '24px', marginBottom: '32px' }}>
-              {(['followers', 'following'] as const).map(v => (
+              {(['following', 'followers'] as const).map(v => (
                 <button key={v} onClick={() => setCirclesView(v)}
                   style={{ fontSize: '11px', letterSpacing: '0.2em', textTransform: 'uppercase', color: circlesView === v ? '#e2d9c8' : '#333', background: 'none', border: 'none', borderBottom: circlesView === v ? '1px solid #e2d9c8' : '1px solid transparent', paddingBottom: '6px', cursor: 'pointer', transition: 'all 0.15s' }}>
                   {v} · {v === 'followers' ? stats.followers : stats.following}
@@ -800,6 +795,37 @@ function ListItemGrid({ items, fetchTmdb, onFilmClick }: { items: { tmdb_id: num
           <Image src={posterUrl(item.poster_path, 'w185')} alt={item.title || ''} fill style={{ objectFit: 'cover' }} unoptimized />
         </div>
       ) : <div key={i} style={{ aspectRatio: '2/3', background: '#111', borderRadius: '2px' }} />)}
+    </div>
+  );
+}
+
+function ListPreviewStrip({ items, fetchTmdb }: {
+  items: { tmdb_id: number; media_type: string }[];
+  fetchTmdb: (id: number, type: string) => Promise<any>;
+}) {
+  const [posters, setPosters] = useState<(string | null)[]>([]);
+
+  useEffect(() => {
+    const toLoad = items.slice(0, 8);
+    Promise.all(toLoad.map(async item => {
+      try {
+        const d = await fetchTmdb(item.tmdb_id, item.media_type);
+        return d?.poster_path || null;
+      } catch { return null; }
+    })).then(setPosters);
+  }, [items.length]);
+
+  if (items.length === 0) return <div style={{ fontSize: '11px', color: '#222', letterSpacing: '0.1em' }}>empty</div>;
+
+  return (
+    <div style={{ display: 'flex', gap: '4px' }}>
+      {(posters.length ? posters : Array(Math.min(items.length, 8)).fill(null)).map((poster, i) => (
+        <div key={i} style={{ width: '56px', aspectRatio: '2/3', borderRadius: '2px', background: '#111', flexShrink: 0, position: 'relative', overflow: 'hidden' }}>
+          {poster && (
+            <Image src={posterUrl(poster, 'w185')} alt="" fill style={{ objectFit: 'cover' }} unoptimized />
+          )}
+        </div>
+      ))}
     </div>
   );
 }
