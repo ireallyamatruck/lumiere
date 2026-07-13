@@ -81,3 +81,59 @@ export function buildTasteVector(signals: FilmSignal[]): TasteVector {
 
   return { hue, sat, lit, genreAffinity, eraSkew, sampleSize: films.length };
 }
+
+export interface CandidateFilm {
+  id: number;
+  colorHue?: number;
+  colorSat?: number;
+  colorLit?: number;
+  genre_ids?: number[];
+  vote_count?: number;
+}
+
+export const TASTE_WEIGHTS = { colour: 0.45, genre: 0.35, novelty: 0.20 };
+const POP_CAP = 12000; // vote_count above this is treated as fully "mainstream"
+
+export function scoreCandidate(film: CandidateFilm, taste: TasteVector): number {
+  const hsl = { h: film.colorHue ?? 0, s: film.colorSat ?? 50, l: film.colorLit ?? 50 };
+  const colourFit = 1 - hslDistance(hsl, { h: taste.hue, s: taste.sat, l: taste.lit });
+
+  const gids = film.genre_ids || [];
+  const genreFit = gids.length
+    ? gids.reduce((a, g) => a + (taste.genreAffinity[g] || 0), 0) / gids.length
+    : 0;
+
+  const novelty = 1 - Math.min(1, (film.vote_count ?? 0) / POP_CAP);
+
+  return TASTE_WEIGHTS.colour * colourFit
+       + TASTE_WEIGHTS.genre * genreFit
+       + TASTE_WEIGHTS.novelty * novelty;
+}
+
+/** Maximal Marginal Relevance: balance score against diversity to avoid a feed of look-alikes. */
+export function mmrRerank(
+  items: { film: CandidateFilm; score: number }[],
+  lambda = 0.7,
+  k = 60,
+): CandidateFilm[] {
+  const pool = [...items].sort((a, b) => b.score - a.score);
+  const selected: { film: CandidateFilm; score: number }[] = [];
+  const simTo = (a: CandidateFilm, b: CandidateFilm) =>
+    1 - hslDistance(
+      { h: a.colorHue ?? 0, s: a.colorSat ?? 50, l: a.colorLit ?? 50 },
+      { h: b.colorHue ?? 0, s: b.colorSat ?? 50, l: b.colorLit ?? 50 },
+    );
+
+  while (selected.length < k && pool.length) {
+    let bestIdx = 0, bestVal = -Infinity;
+    for (let i = 0; i < pool.length; i++) {
+      const maxSim = selected.length
+        ? Math.max(...selected.map(s => simTo(pool[i].film, s.film)))
+        : 0;
+      const val = lambda * pool[i].score - (1 - lambda) * maxSim;
+      if (val > bestVal) { bestVal = val; bestIdx = i; }
+    }
+    selected.push(pool.splice(bestIdx, 1)[0]);
+  }
+  return selected.map(s => s.film);
+}

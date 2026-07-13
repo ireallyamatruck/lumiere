@@ -57,3 +57,42 @@ describe('buildTasteVector', () => {
     expect(v.sampleSize).toBe(1);
   });
 });
+
+import { scoreCandidate, mmrRerank, CandidateFilm } from './taste';
+
+const taste = buildTasteVector([
+  sig({ id: 1, colorHue: 210, genre_ids: [18] }),
+  sig({ id: 2, colorHue: 210, genre_ids: [18] }),
+  sig({ id: 3, colorHue: 200, genre_ids: [18, 80] }),
+]);
+
+const cand = (o: Partial<CandidateFilm>): CandidateFilm => ({
+  id: 0, colorHue: 210, colorSat: 50, colorLit: 50, genre_ids: [18], vote_count: 500, ...o,
+});
+
+describe('scoreCandidate', () => {
+  it('scores colour-and-genre-aligned films higher', () => {
+    const aligned = scoreCandidate(cand({ id: 10, colorHue: 210, genre_ids: [18] }), taste);
+    const off = scoreCandidate(cand({ id: 11, colorHue: 40, genre_ids: [35] }), taste);
+    expect(aligned).toBeGreaterThan(off);
+  });
+  it('novelty dampens mega-popular films (push not pull)', () => {
+    const niche = scoreCandidate(cand({ id: 12, vote_count: 300 }), taste);
+    const blockbuster = scoreCandidate(cand({ id: 13, vote_count: 30000 }), taste);
+    expect(niche).toBeGreaterThan(blockbuster);
+  });
+});
+
+describe('mmrRerank', () => {
+  it('returns at most k and avoids near-duplicates up front', () => {
+    const items = [
+      { film: cand({ id: 1, colorHue: 210 }), score: 0.9 },
+      { film: cand({ id: 2, colorHue: 211 }), score: 0.89 }, // near-dup of 1
+      { film: cand({ id: 3, colorHue: 40 }),  score: 0.7 },
+    ];
+    const out = mmrRerank(items, 0.7, 2);
+    expect(out).toHaveLength(2);
+    expect(out.map(f => f.id)).toContain(1);
+    expect(out.map(f => f.id)).toContain(3); // diversity beats the near-dup #2
+  });
+});
