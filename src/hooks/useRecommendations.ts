@@ -21,9 +21,15 @@ export function useRecommendations(allMovies: Movie[], enabled: boolean) {
   useEffect(() => {
     if (!enabled || !user || allMovies.length === 0) { setStatus('idle'); return; }
     const key = `${user.id}:${allMovies.length}`;
-    if (key === lastKey.current) return;
+    // Re-entering the view with the same corpus: keep whatever we already computed,
+    // but restore a truthful status instead of leaving it at 'idle'.
+    if (key === lastKey.current) {
+      setStatus(prev => (prev === 'idle' ? (taste ? 'ready' : recs.length ? 'cold' : 'idle') : prev));
+      return;
+    }
     lastKey.current = key;
 
+    let cancelled = false;
     (async () => {
       setStatus('loading');
       const [{ data: watched }, { data: likes }, { data: ratings }] = await Promise.all([
@@ -31,6 +37,7 @@ export function useRecommendations(allMovies: Movie[], enabled: boolean) {
         supabase.from('likes').select('tmdb_id').eq('user_id', user.id),
         supabase.from('ratings').select('tmdb_id, rating').eq('user_id', user.id),
       ]);
+      if (cancelled) return;
 
       const watchedIds = new Set((watched || []).map((w: any) => w.tmdb_id));
       const likedIds = new Set((likes || []).map((l: any) => l.tmdb_id));
@@ -41,9 +48,10 @@ export function useRecommendations(allMovies: Movie[], enabled: boolean) {
         // Cold start: colour-diverse sampler over mid-popular films (explore mode).
         const seed = allMovies.filter(m => m.colorHue !== undefined);
         const sampled = mmrRerank(
-          seed.map(m => ({ film: m as any, score: 1 - Math.min(1, (m.vote_count ?? 0) / 12000) })),
+          seed.map(m => ({ film: m, score: 1 - Math.min(1, (m.vote_count ?? 0) / 12000) })),
           0.5, 60,
-        ) as unknown as Movie[];
+        );
+        if (cancelled) return;
         setRecs(sampled); setTaste(null); setStatus('cold');
         return;
       }
@@ -62,16 +70,19 @@ export function useRecommendations(allMovies: Movie[], enabled: boolean) {
         });
       }
 
-      if (signals.length < MIN_SIGNALS) { setStatus('cold'); setRecs([]); return; }
+      if (signals.length < MIN_SIGNALS) { if (!cancelled) { setStatus('cold'); setRecs([]); } return; }
 
       const tasteVec = buildTasteVector(signals);
       const scored = allMovies
         .filter(m => !watchedIds.has(m.id) && m.colorHue !== undefined)
-        .map(m => ({ film: m as any, score: scoreCandidate(m as any, tasteVec) }));
-      const ranked = mmrRerank(scored, 0.7, 80) as unknown as Movie[];
+        .map(m => ({ film: m, score: scoreCandidate(m, tasteVec) }));
+      const ranked = mmrRerank(scored, 0.7, 80);
+      if (cancelled) return;
 
       setTaste(tasteVec); setRecs(ranked); setStatus('ready');
     })();
+
+    return () => { cancelled = true; };
   }, [enabled, user?.id, allMovies.length]);
 
   return { recs, status, taste };

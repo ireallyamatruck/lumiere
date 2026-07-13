@@ -111,13 +111,13 @@ export function scoreCandidate(film: CandidateFilm, taste: TasteVector): number 
 }
 
 /** Maximal Marginal Relevance: balance score against diversity to avoid a feed of look-alikes. */
-export function mmrRerank(
-  items: { film: CandidateFilm; score: number }[],
+export function mmrRerank<T extends CandidateFilm>(
+  items: { film: T; score: number }[],
   lambda = 0.7,
   k = 60,
-): CandidateFilm[] {
+): T[] {
   const pool = [...items].sort((a, b) => b.score - a.score);
-  const selected: { film: CandidateFilm; score: number }[] = [];
+  const selected: { film: T; score: number }[] = [];
   const simTo = (a: CandidateFilm, b: CandidateFilm) =>
     1 - hslDistance(
       { h: a.colorHue ?? 0, s: a.colorSat ?? 50, l: a.colorLit ?? 50 },
