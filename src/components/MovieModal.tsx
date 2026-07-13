@@ -5,17 +5,25 @@ import Image from 'next/image';
 import { Movie, posterUrl, getTitle, getYear } from '@/lib/tmdb';
 import { supabase, Review } from '@/lib/supabase';
 import FilmActions from './FilmActions';
+import MovieMetrics from './MovieMetrics';
 import { useAuth } from '@/context/AuthContext';
+
+interface MooveDiveData {
+  found: boolean;
+  characteristics?: Record<string, number>;
+  similar?: Movie[];
+}
 
 interface Props {
   movie: Movie | null;
   genres: Record<number, string>;
   onClose: () => void;
   onAuthRequired: () => void;
+  onMovieSelect?: (movie: Movie) => void;
   readOnly?: boolean;
 }
 
-export default function MovieModal({ movie, genres, onClose, onAuthRequired, readOnly }: Props) {
+export default function MovieModal({ movie, genres, onClose, onAuthRequired, onMovieSelect, readOnly }: Props) {
   const { user } = useAuth();
   const [reviews, setReviews] = useState<any[]>([]);
   const [reviewLikes, setReviewLikes] = useState<Record<string, number>>({});
@@ -24,6 +32,7 @@ export default function MovieModal({ movie, genres, onClose, onAuthRequired, rea
   const [submittingComment, setSubmittingComment] = useState<string | null>(null);
   const [rtRating, setRtRating] = useState<string | null>(null);
   const [showReviews, setShowReviews] = useState(false);
+  const [diveData, setDiveData] = useState<MooveDiveData | null>(null);
 
   useEffect(() => {
     const handler = (e: KeyboardEvent) => { if (e.key === 'Escape') onClose(); };
@@ -57,11 +66,17 @@ export default function MovieModal({ movie, genres, onClose, onAuthRequired, rea
   };
 
   useEffect(() => {
-    if (!movie) { setReviews([]); setRtRating(null); setShowReviews(false); return; }
+    if (!movie) { setReviews([]); setRtRating(null); setShowReviews(false); setDiveData(null); return; }
     fetchReviews(movie.id);
     const type = movie.title ? 'movie' : 'tv';
     fetch(`/api/ratings?tmdb_id=${movie.id}&type=${type}`)
       .then(r => r.json()).then(d => { if (d.rt) setRtRating(d.rt); }).catch(() => {});
+    const title = movie.title || movie.name;
+    if (title) {
+      setDiveData(null);
+      fetch(`/api/moviedive?title=${encodeURIComponent(title)}`)
+        .then(r => r.json()).then(setDiveData).catch(() => {});
+    }
   }, [movie?.id, user?.id]);
 
   const toggleReviewLike = async (reviewId: string) => {
@@ -182,8 +197,47 @@ export default function MovieModal({ movie, genres, onClose, onAuthRequired, rea
             )}
           </div>
 
+          {/* Film metrics */}
+          {diveData?.found && diveData.characteristics && (
+            <MovieMetrics characteristics={diveData.characteristics} accentColor={movie.dominantColor} />
+          )}
+
           {/* Film actions */}
           {!readOnly && <FilmActions movie={movie} onAuthRequired={onAuthRequired} onReviewSubmit={() => fetchReviews(movie.id)} />}
+
+          {/* Similar films */}
+          {diveData?.found && diveData.similar && diveData.similar.length > 0 && (
+            <div className="px-6 pb-4">
+              <div style={{ fontSize: '11px', letterSpacing: '0.25em', textTransform: 'uppercase', color: '#555', marginBottom: '12px' }}>
+                similar films
+              </div>
+              <div style={{ display: 'flex', gap: '10px', overflowX: 'auto', paddingBottom: '4px' }}>
+                {diveData.similar.map((s: any) => (
+                  <button
+                    key={s.id}
+                    onClick={() => onMovieSelect && onMovieSelect(s)}
+                    style={{ flexShrink: 0, width: '80px', background: 'none', border: 'none', cursor: onMovieSelect ? 'pointer' : 'default', padding: 0, textAlign: 'left' }}
+                  >
+                    <div style={{ width: '80px', height: '120px', borderRadius: '3px', overflow: 'hidden', background: '#111', marginBottom: '5px', border: '1px solid #1e1e1e' }}>
+                      {s.poster_path && (
+                        <Image
+                          src={`https://image.tmdb.org/t/p/w185${s.poster_path}`}
+                          alt={s.title || s.mooreName}
+                          width={80}
+                          height={120}
+                          style={{ objectFit: 'cover', width: '100%', height: '100%' }}
+                          unoptimized
+                        />
+                      )}
+                    </div>
+                    <div style={{ fontSize: '10px', color: '#888', letterSpacing: '0.04em', lineHeight: '1.3', overflow: 'hidden', display: '-webkit-box', WebkitLineClamp: 2, WebkitBoxOrient: 'vertical' }}>
+                      {s.title || s.mooreName}
+                    </div>
+                  </button>
+                ))}
+              </div>
+            </div>
+          )}
 
           {/* View Reviews toggle */}
           {!readOnly && (
