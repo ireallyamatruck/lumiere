@@ -29,3 +29,31 @@ describe('hslDistance', () => {
     expect(far).toBeGreaterThan(near);
   });
 });
+
+import { buildTasteVector, FilmSignal } from './taste';
+
+const sig = (o: Partial<FilmSignal>): FilmSignal => ({
+  id: 0, colorHue: 200, colorSat: 50, colorLit: 50, genre_ids: [18], weight: 1, ...o,
+});
+
+describe('buildTasteVector', () => {
+  it('reports sample size', () => {
+    const v = buildTasteVector([sig({ id: 1 }), sig({ id: 2 })]);
+    expect(v.sampleSize).toBe(2);
+  });
+  it('centroid tracks the dominant colour', () => {
+    const v = buildTasteVector([
+      sig({ id: 1, colorHue: 210 }), sig({ id: 2, colorHue: 210 }), sig({ id: 3, colorHue: 30 }),
+    ]);
+    expect(hueDistance(v.hue, 210)).toBeLessThan(hueDistance(v.hue, 30));
+  });
+  it('normalizes genre affinity to <= 1', () => {
+    const v = buildTasteVector([sig({ genre_ids: [18, 80] }), sig({ genre_ids: [18] })]);
+    expect(v.genreAffinity[18]).toBeGreaterThan(v.genreAffinity[80]);
+    expect(Math.max(...Object.values(v.genreAffinity))).toBeLessThanOrEqual(1);
+  });
+  it('skips films without colour', () => {
+    const v = buildTasteVector([sig({ id: 1 }), sig({ id: 2, colorHue: undefined })]);
+    expect(v.sampleSize).toBe(1);
+  });
+});
