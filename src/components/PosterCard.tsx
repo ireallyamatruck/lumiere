@@ -1,6 +1,6 @@
 'use client';
 
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import Image from 'next/image';
 import { Movie, posterUrl, getTitle, getYear } from '@/lib/tmdb';
 import rtCache from '@/lib/rtCache';
@@ -13,13 +13,30 @@ interface Props {
 
 export default function PosterCard({ movie, index, onClick }: Props) {
   const [hovered, setHovered] = useState(false);
+  const [rt, setRt] = useState<string | null | undefined>(undefined);
+
+  useEffect(() => {
+    if (!hovered) return;
+    const cached = rtCache.get(movie.id);
+    if (cached !== undefined) { setRt(cached); return; }
+    // Claim the slot immediately to prevent duplicate fetches on rapid hover
+    rtCache.set(movie.id, null);
+    const type = movie.title ? 'movie' : 'tv';
+    fetch(`/api/ratings?tmdb_id=${movie.id}&type=${type}`)
+      .then(r => r.json())
+      .then(d => {
+        const rating = d.rt ?? null;
+        rtCache.set(movie.id, rating);
+        setRt(rating);
+      })
+      .catch(() => {});
+  }, [hovered, movie.id]);
+
   if (!movie.poster_path) return null;
 
   const title = getTitle(movie);
   const year = getYear(movie);
   const dot = movie.dominantColor || '#555';
-  // Read from shared cache on each hover re-render — appears once user has opened this film
-  const rt = hovered ? rtCache.get(movie.id) : undefined;
 
   return (
     <div

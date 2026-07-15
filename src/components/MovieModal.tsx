@@ -70,17 +70,23 @@ export default function MovieModal({ movie, genres, onClose, onAuthRequired, onM
 
   useEffect(() => {
     if (!movie) { setReviews([]); setRtRating(null); setShowReviews(false); setDiveData(null); return; }
+    setRtRating(null);
     trackBrowse(movie);
     fetchReviews(movie.id);
-    const type = movie.title ? 'movie' : 'tv';
-    fetch(`/api/ratings?tmdb_id=${movie.id}&type=${type}`)
-      .then(r => r.json())
-      .then(d => {
-        const rt = d.rt || null;
-        rtCache.set(movie.id, rt);
-        if (rt) setRtRating(rt);
-      })
-      .catch(() => {});
+    const cached = rtCache.get(movie.id);
+    if (cached !== undefined) {
+      setRtRating(cached);
+    } else {
+      const type = movie.title ? 'movie' : 'tv';
+      fetch(`/api/ratings?tmdb_id=${movie.id}&type=${type}`)
+        .then(r => r.json())
+        .then(d => {
+          const rt = d.rt ?? null;
+          rtCache.set(movie.id, rt);
+          setRtRating(rt);
+        })
+        .catch(() => {});
+    }
     const title = movie.title || movie.name;
     if (title) {
       setDiveData(null);
