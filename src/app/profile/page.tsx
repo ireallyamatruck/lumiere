@@ -633,7 +633,7 @@ export default function ProfilePage() {
         )}
 
       </div>
-      <MovieModal movie={modalFilm} genres={{}} onClose={() => setModalFilm(null)} onAuthRequired={() => {}} readOnly={modalReadOnly} />
+      <MovieModal movie={modalFilm} genres={{}} onClose={() => setModalFilm(null)} onAuthRequired={() => {}} onMovieSelect={setModalFilm} readOnly={modalReadOnly} />
     </main>
   );
 }

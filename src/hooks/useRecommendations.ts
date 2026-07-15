@@ -11,7 +11,7 @@ import {
 export type RecStatus = 'idle' | 'loading' | 'cold' | 'ready';
 const MIN_SIGNALS = 5;
 
-export function useRecommendations(allMovies: Movie[], enabled: boolean) {
+export function useRecommendations(allMovies: Movie[], enabled: boolean, refreshKey = 0) {
   const { user } = useAuth();
   const [recs, setRecs] = useState<Movie[]>([]);
   const [taste, setTaste] = useState<TasteVector | null>(null);
@@ -20,7 +20,7 @@ export function useRecommendations(allMovies: Movie[], enabled: boolean) {
 
   useEffect(() => {
     if (!enabled || !user || allMovies.length === 0) { setStatus('idle'); return; }
-    const key = `${user.id}:${allMovies.length}`;
+    const key = `${user.id}:${allMovies.length}:${refreshKey}`;
     // Re-entering the view with the same corpus: keep whatever we already computed,
     // but restore a truthful status instead of leaving it at 'idle'.
     if (key === lastKey.current) {
@@ -83,7 +83,7 @@ export function useRecommendations(allMovies: Movie[], enabled: boolean) {
     })();
 
     return () => { cancelled = true; };
-  }, [enabled, user?.id, allMovies.length]);
+  }, [enabled, user?.id, allMovies.length, refreshKey]);
 
   return { recs, status, taste };
 }

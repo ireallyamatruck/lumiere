@@ -9,7 +9,7 @@ import MovieModal from '@/components/MovieModal';
 import CosmosView from '@/components/CosmosView';
 import AuthModal from '@/components/AuthModal';
 import { useAuth } from '@/context/AuthContext';
-import { useRecommendations } from '@/hooks/useRecommendations';
+import FreeRoamView from '@/components/FreeRoamView';
 
 const SORT_OPTIONS = [
   { value: 'popularity.desc', label: 'popular' },
@@ -63,7 +63,7 @@ function sortMovies(movies: Movie[], sortBy: string): Movie[] {
   return movies; // popularity.desc — already sorted by popularity_rank in cache
 }
 
-type ViewMode = 'grid' | 'cosmos' | 'foryou';
+type ViewMode = 'grid' | 'cosmos' | 'freeRoam';
 type ColorMode = 'poster' | 'cinema';
 
 function hueDist(a: number, b: number) {
@@ -121,7 +121,7 @@ export default function Home() {
   const idSetRef = useRef<Set<number>>(new Set());
   const fromCacheRef = useRef(false);
 
-  const { recs, status: recStatus } = useRecommendations(allMovies, viewMode === 'foryou');
+  const [refreshKey, setRefreshKey] = useState(0);
 
   // Restore mode from session or show overlay
   useEffect(() => {
@@ -434,11 +434,11 @@ export default function Home() {
                 {showSearch ? 'cancel' : 'search'}
               </button>
               <div className="flex items-center gap-1 border border-[#1e1e1e] rounded-sm overflow-hidden">
-                {(['grid', 'cosmos', 'foryou'] as ViewMode[]).map(v => (
+                {(['grid', 'cosmos', 'freeRoam'] as ViewMode[]).map(v => (
                   <button key={v} onClick={() => setViewMode(v)}
                     className="text-[10px] tracking-[0.15em] uppercase px-3 py-[5px] transition-all duration-200"
                     style={{ background: viewMode === v ? '#1a1a1a' : 'transparent', color: viewMode === v ? '#e2d9c8' : '#444' }}>
-                    {v === 'foryou' ? 'for you' : v}
+                    {v === 'freeRoam' ? 'free roam' : v}
                   </button>
                 ))}
               </div>
@@ -612,35 +612,13 @@ export default function Home() {
 
           {viewMode === 'cosmos' ? (
             <CosmosView movies={allMovies} onSelect={setSelected} activeHue={cosmosHue} />
-          ) : viewMode === 'foryou' ? (
-            <div className="px-8 py-6">
-              {!user ? (
-                <div className="flex flex-col items-center justify-center py-24 gap-4">
-                  <div style={{ fontSize: '12px', color: '#444', letterSpacing: '0.3em', textTransform: 'uppercase' }}>sign in to get recommendations</div>
-                  <button onClick={() => setShowAuth(true)}
-                    style={{ fontSize: '11px', letterSpacing: '0.2em', textTransform: 'uppercase', border: '1px solid #2a2a2a', color: '#e2d9c8', padding: '7px 18px', borderRadius: '3px', background: 'transparent', cursor: 'pointer' }}>sign in</button>
-                </div>
-              ) : recStatus === 'loading' ? (
-                <div className="grid grid-cols-3 sm:grid-cols-4 md:grid-cols-5 lg:grid-cols-6 xl:grid-cols-7 gap-3">
-                  {Array.from({ length: 20 }).map((_, i) => (
-                    <div key={i} className="skeleton rounded-sm" style={{ aspectRatio: '2/3', animationDelay: `${i * 40}ms` }} />
-                  ))}
-                </div>
-              ) : (
-                <>
-                  <div style={{ fontSize: '10px', color: '#1e1e1e', letterSpacing: '0.3em', textTransform: 'uppercase', marginBottom: '24px' }}>
-                    {recStatus === 'cold'
-                      ? 'watch or rate a few films to sharpen this · exploring for now'
-                      : `${recs.length} films chosen for your palette`}
-                  </div>
-                  <div className="grid grid-cols-3 sm:grid-cols-4 md:grid-cols-5 lg:grid-cols-6 xl:grid-cols-7 gap-3">
-                    {recs.map((movie, i) => (
-                      <PosterCard key={movie.id} movie={movie} index={i} onClick={setSelected} />
-                    ))}
-                  </div>
-                </>
-              )}
-            </div>
+          ) : viewMode === 'freeRoam' ? (
+            <FreeRoamView
+              allMovies={allMovies}
+              onMovieClick={setSelected}
+              onAuthRequired={() => setShowAuth(true)}
+              refreshKey={refreshKey}
+            />
           ) : (
             <div className="px-8 py-6">
               {loading ? (
@@ -667,7 +645,7 @@ export default function Home() {
         </>
       )}
 
-      <MovieModal movie={selected} genres={genres} onClose={() => setSelected(null)} onAuthRequired={() => setShowAuth(true)} onMovieSelect={setSelected} />
+      <MovieModal movie={selected} genres={genres} onClose={() => setSelected(null)} onAuthRequired={() => setShowAuth(true)} onMovieSelect={setSelected} onFilmActivity={() => setRefreshKey(k => k + 1)} />
       {showAuth && <AuthModal onClose={() => setShowAuth(false)} />}
     </main>
   );

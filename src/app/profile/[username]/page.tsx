@@ -408,6 +408,7 @@ export default function PublicProfilePage() {
         genres={{}}
         onClose={() => setModalFilm(null)}
         onAuthRequired={() => setShowAuthPrompt(true)}
+        onMovieSelect={setModalFilm}
         readOnly={false}
       />
     </main>

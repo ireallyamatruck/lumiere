@@ -9,6 +9,7 @@ interface Props {
   movie: Movie;
   onAuthRequired: () => void;
   onReviewSubmit?: () => void;
+  onFilmActivity?: () => void;
 }
 
 function StarRating({ value, onChange }: { value: number; onChange: (v: number) => void }) {
@@ -39,7 +40,7 @@ const ACTION_ICONS: Record<string, string> = {
   watched: '◎', like: '♥', watchlist: '⊕', review: '✎'
 };
 
-export default function FilmActions({ movie, onAuthRequired, onReviewSubmit }: Props) {
+export default function FilmActions({ movie, onAuthRequired, onReviewSubmit, onFilmActivity }: Props) {
   const { user } = useAuth();
   const tmdbId = movie.id;
   const mediaType = movie.title ? 'movie' : 'tv';
@@ -88,6 +89,7 @@ export default function FilmActions({ movie, onAuthRequired, onReviewSubmit }: P
     if (watched) await supabase.from('watched').delete().eq('user_id', user!.id).eq('tmdb_id', tmdbId);
     else await supabase.from('watched').insert({ user_id: user!.id, tmdb_id: tmdbId, media_type: mediaType });
     setWatched(!watched);
+    onFilmActivity?.();
   });
 
   const toggleLike = () => guard(async () => {
@@ -115,6 +117,7 @@ export default function FilmActions({ movie, onAuthRequired, onReviewSubmit }: P
     setReviewTitle('');
     setReviewBody('');
     onReviewSubmit?.();
+    onFilmActivity?.();
   };
 
   const toggleWatchlist = async (wlId: string) => {

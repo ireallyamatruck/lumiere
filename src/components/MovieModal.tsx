@@ -7,6 +7,8 @@ import { supabase, Review } from '@/lib/supabase';
 import FilmActions from './FilmActions';
 import MovieMetrics from './MovieMetrics';
 import { useAuth } from '@/context/AuthContext';
+import rtCache from '@/lib/rtCache';
+import { trackBrowse } from '@/hooks/useRecentlyBrowsed';
 
 interface MooveDiveData {
   found: boolean;
@@ -20,10 +22,11 @@ interface Props {
   onClose: () => void;
   onAuthRequired: () => void;
   onMovieSelect?: (movie: Movie) => void;
+  onFilmActivity?: () => void;
   readOnly?: boolean;
 }
 
-export default function MovieModal({ movie, genres, onClose, onAuthRequired, onMovieSelect, readOnly }: Props) {
+export default function MovieModal({ movie, genres, onClose, onAuthRequired, onMovieSelect, onFilmActivity, readOnly }: Props) {
   const { user } = useAuth();
   const [reviews, setReviews] = useState<any[]>([]);
   const [reviewLikes, setReviewLikes] = useState<Record<string, number>>({});
@@ -67,10 +70,17 @@ export default function MovieModal({ movie, genres, onClose, onAuthRequired, onM
 
   useEffect(() => {
     if (!movie) { setReviews([]); setRtRating(null); setShowReviews(false); setDiveData(null); return; }
+    trackBrowse(movie);
     fetchReviews(movie.id);
     const type = movie.title ? 'movie' : 'tv';
     fetch(`/api/ratings?tmdb_id=${movie.id}&type=${type}`)
-      .then(r => r.json()).then(d => { if (d.rt) setRtRating(d.rt); }).catch(() => {});
+      .then(r => r.json())
+      .then(d => {
+        const rt = d.rt || null;
+        rtCache.set(movie.id, rt);
+        if (rt) setRtRating(rt);
+      })
+      .catch(() => {});
     const title = movie.title || movie.name;
     if (title) {
       setDiveData(null);
@@ -203,7 +213,7 @@ export default function MovieModal({ movie, genres, onClose, onAuthRequired, onM
           )}
 
           {/* Film actions */}
-          {!readOnly && <FilmActions movie={movie} onAuthRequired={onAuthRequired} onReviewSubmit={() => fetchReviews(movie.id)} />}
+          {!readOnly && <FilmActions movie={movie} onAuthRequired={onAuthRequired} onReviewSubmit={() => fetchReviews(movie.id)} onFilmActivity={onFilmActivity} />}
 
           {/* Similar films */}
           {diveData?.found && diveData.similar && diveData.similar.length > 0 && (
