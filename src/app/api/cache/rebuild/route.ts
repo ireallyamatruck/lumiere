@@ -17,8 +17,10 @@ async function fetchPage(type: string, page: number): Promise<any[]> {
 }
 
 export async function GET(req: NextRequest) {
-  const secret = req.nextUrl.searchParams.get('secret');
-  if (!process.env.CACHE_REBUILD_SECRET || secret !== process.env.CACHE_REBUILD_SECRET) {
+  // Vercel automatically sends `Authorization: Bearer $CRON_SECRET` on cron-triggered
+  // requests when CRON_SECRET is set as an env var — nothing sensitive lives in the URL.
+  const authHeader = req.headers.get('authorization');
+  if (!process.env.CRON_SECRET || authHeader !== `Bearer ${process.env.CRON_SECRET}`) {
     return NextResponse.json({ error: 'unauthorized' }, { status: 401 });
   }
 

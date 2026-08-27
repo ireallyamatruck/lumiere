@@ -63,8 +63,10 @@ async function extractColor(posterPath: string): Promise<any | null> {
 }
 
 export async function GET(req: NextRequest) {
-  const secret = req.nextUrl.searchParams.get('secret');
-  if (!process.env.CACHE_REBUILD_SECRET || secret !== process.env.CACHE_REBUILD_SECRET) {
+  // Manually-triggered admin backfill — call with `Authorization: Bearer $CRON_SECRET`,
+  // never a URL query param (query strings end up in logs, history, and referrer headers).
+  const authHeader = req.headers.get('authorization');
+  if (!process.env.CRON_SECRET || authHeader !== `Bearer ${process.env.CRON_SECRET}`) {
     return NextResponse.json({ error: 'unauthorized' }, { status: 401 });
   }
 

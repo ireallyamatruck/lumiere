@@ -1,11 +1,11 @@
 {
   "crons": [
     {
-      "path": "/api/cache/rebuild?secret=lumiere2026&type=movie",
+      "path": "/api/cache/rebuild?type=movie",
       "schedule": "0 3 * * *"
     },
     {
-      "path": "/api/cache/rebuild?secret=lumiere2026&type=tv",
+      "path": "/api/cache/rebuild?type=tv",
       "schedule": "30 3 * * *"
     }
   ]
