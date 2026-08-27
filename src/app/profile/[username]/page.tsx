@@ -6,6 +6,7 @@ import { supabase } from '@/lib/supabase';
 import { posterUrl } from '@/lib/tmdb';
 import Image from 'next/image';
 import { useRouter, useParams } from 'next/navigation';
+import { useRtRating } from '@/hooks/useRtRating';
 import MovieModal from '@/components/MovieModal';
 
 type Tab = 'watched' | 'reviews' | 'lists';
@@ -408,6 +409,7 @@ export default function PublicProfilePage() {
         genres={{}}
         onClose={() => setModalFilm(null)}
         onAuthRequired={() => setShowAuthPrompt(true)}
+        onMovieSelect={setModalFilm}
         readOnly={false}
       />
     </main>
@@ -439,6 +441,7 @@ function FollowButton({ isFollowing, loading, onClick }: { isFollowing: boolean;
 
 function FilmTile({ film, onClick }: { film: any; onClick?: () => void }) {
   const [hovered, setHovered] = useState(false);
+  const rt = useRtRating(film.tmdb_id, film.media_type, hovered);
   if (!film.poster_path) return null;
   return (
     <div
@@ -448,9 +451,21 @@ function FilmTile({ film, onClick }: { film: any; onClick?: () => void }) {
       onMouseEnter={() => setHovered(true)}
       onMouseLeave={() => setHovered(false)}
     >
-      <Image src={posterUrl(film.poster_path, 'w185')} alt={film.title || ''} fill style={{ objectFit: 'cover' }} unoptimized />
+      <Image src={posterUrl(film.poster_path, 'w185')} alt={film.title || ''} fill style={{ objectFit: 'cover', transition: 'filter 0.2s', filter: hovered ? 'brightness(0.45)' : 'brightness(1)' }} unoptimized />
       {hovered && (
-        <div style={{ position: 'absolute', inset: 0, background: 'rgba(0,0,0,0.78)', display: 'flex', flexDirection: 'column', justifyContent: 'flex-end', padding: '7px 6px' }}>
+        <div style={{ position: 'absolute', inset: 0, display: 'flex', flexDirection: 'column', justifyContent: 'flex-end', padding: '7px 6px', background: 'linear-gradient(to top, rgba(0,0,0,0.75) 0%, transparent 50%)', pointerEvents: 'none' }}>
+          <div style={{ display: 'flex', gap: '3px', flexWrap: 'wrap', marginBottom: '4px' }}>
+            {film.vote_average > 0 && (
+              <span style={{ background: '#F5C518', color: '#000', fontSize: '8px', fontWeight: 800, padding: '1px 4px', borderRadius: '2px', letterSpacing: '0.03em', lineHeight: '13px' }}>
+                IMDb {film.vote_average.toFixed(1)}
+              </span>
+            )}
+            {rt && (
+              <span style={{ background: '#FA320A', color: '#fff', fontSize: '8px', fontWeight: 800, padding: '1px 4px', borderRadius: '2px', letterSpacing: '0.03em', lineHeight: '13px' }}>
+                RT {rt}
+              </span>
+            )}
+          </div>
           <div style={{ fontSize: '10px', color: '#e2d9c8', lineHeight: 1.3 }}>{film.title}</div>
         </div>
       )}
@@ -488,6 +503,37 @@ function EmptyState({ text }: { text: string }) {
   return <div style={{ fontSize: '12px', color: '#222', letterSpacing: '0.15em', padding: '48px 0' }}>{text}</div>;
 }
 
+function ListItemCard({ item, onFilmClick }: { item: any; onFilmClick: (film: any) => void }) {
+  const [hovered, setHovered] = useState(false);
+  const rt = useRtRating(item.tmdb_id, item.media_type, hovered);
+  if (!item.poster_path) return <div style={{ aspectRatio: '2/3', background: '#111', borderRadius: '2px' }} />;
+  return (
+    <div onClick={() => onFilmClick(item)}
+      style={{ position: 'relative', aspectRatio: '2/3', borderRadius: '2px', overflow: 'hidden', background: '#111', cursor: 'pointer' }}
+      onMouseEnter={() => setHovered(true)}
+      onMouseLeave={() => setHovered(false)}>
+      <Image src={posterUrl(item.poster_path, 'w185')} alt={item.title || ''} fill style={{ objectFit: 'cover', transition: 'filter 0.2s', filter: hovered ? 'brightness(0.45)' : 'brightness(1)' }} unoptimized />
+      {hovered && (
+        <div style={{ position: 'absolute', inset: 0, display: 'flex', flexDirection: 'column', justifyContent: 'flex-end', padding: '6px 5px', background: 'linear-gradient(to top, rgba(0,0,0,0.75) 0%, transparent 50%)', pointerEvents: 'none' }}>
+          <div style={{ display: 'flex', gap: '3px', flexWrap: 'wrap', marginBottom: '3px' }}>
+            {item.vote_average > 0 && (
+              <span style={{ background: '#F5C518', color: '#000', fontSize: '8px', fontWeight: 800, padding: '1px 3px', borderRadius: '2px', letterSpacing: '0.03em', lineHeight: '13px' }}>
+                IMDb {item.vote_average.toFixed(1)}
+              </span>
+            )}
+            {rt && (
+              <span style={{ background: '#FA320A', color: '#fff', fontSize: '8px', fontWeight: 800, padding: '1px 3px', borderRadius: '2px', letterSpacing: '0.03em', lineHeight: '13px' }}>
+                RT {rt}
+              </span>
+            )}
+          </div>
+          <div style={{ fontSize: '9px', color: '#e2d9c8', lineHeight: 1.3, overflow: 'hidden', display: '-webkit-box', WebkitLineClamp: 2, WebkitBoxOrient: 'vertical' }}>{item.title}</div>
+        </div>
+      )}
+    </div>
+  );
+}
+
 function ListItemGrid({ items, fetchTmdb, onFilmClick }: {
   items: { tmdb_id: number; media_type: string }[];
   fetchTmdb: (id: number, type: string) => Promise<any>;
@@ -505,14 +551,7 @@ function ListItemGrid({ items, fetchTmdb, onFilmClick }: {
 
   return (
     <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(80px, 1fr))', gap: '4px' }}>
-      {enriched.map((item, i) => item.poster_path ? (
-        <div key={i} onClick={() => onFilmClick(item)}
-          style={{ position: 'relative', aspectRatio: '2/3', borderRadius: '2px', overflow: 'hidden', background: '#111', cursor: 'pointer', transition: 'filter 0.2s' }}
-          onMouseEnter={e => { e.currentTarget.style.filter = 'brightness(1.3)'; }}
-          onMouseLeave={e => { e.currentTarget.style.filter = 'brightness(1)'; }}>
-          <Image src={posterUrl(item.poster_path, 'w185')} alt={item.title || ''} fill style={{ objectFit: 'cover' }} unoptimized />
-        </div>
-      ) : <div key={i} style={{ aspectRatio: '2/3', background: '#111', borderRadius: '2px' }} />)}
+      {enriched.map((item, i) => <ListItemCard key={i} item={item} onFilmClick={onFilmClick} />)}
     </div>
   );
 }

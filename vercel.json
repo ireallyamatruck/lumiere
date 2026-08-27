@@ -7,6 +7,14 @@
     {
       "path": "/api/cache/rebuild?type=tv",
       "schedule": "30 3 * * *"
+    },
+    {
+      "path": "/api/movies?type=movie",
+      "schedule": "0 4 * * *"
+    },
+    {
+      "path": "/api/movies?type=tv",
+      "schedule": "0 5 * * *"
     }
   ]
 }

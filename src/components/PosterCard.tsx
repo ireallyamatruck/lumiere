@@ -1,7 +1,9 @@
 'use client';
 
+import { useState } from 'react';
 import Image from 'next/image';
 import { Movie, posterUrl, getTitle, getYear } from '@/lib/tmdb';
+import { useRtRating } from '@/hooks/useRtRating';
 
 interface Props {
   movie: Movie;
@@ -10,6 +12,9 @@ interface Props {
 }
 
 export default function PosterCard({ movie, index, onClick }: Props) {
+  const [hovered, setHovered] = useState(false);
+  const rt = useRtRating(movie.id, movie.title ? 'movie' : 'tv', hovered);
+
   if (!movie.poster_path) return null;
 
   const title = getTitle(movie);
@@ -21,6 +26,8 @@ export default function PosterCard({ movie, index, onClick }: Props) {
       className="poster-card animate-fade-up"
       style={{ animationDelay: `${Math.min(index * 25, 600)}ms`, opacity: 0 }}
       onClick={() => onClick(movie)}
+      onMouseEnter={() => setHovered(true)}
+      onMouseLeave={() => setHovered(false)}
     >
       <Image
         src={posterUrl(movie.poster_path, 'w342')}
@@ -34,6 +41,19 @@ export default function PosterCard({ movie, index, onClick }: Props) {
       <div className="color-pip" style={{ background: dot }} />
 
       <div className="poster-overlay">
+        <div style={{ display: 'flex', gap: '5px', marginBottom: '8px', flexWrap: 'wrap' }}>
+          {movie.vote_average > 0 && (
+            <span style={{ background: '#F5C518', color: '#000', fontSize: '9px', fontWeight: 800, padding: '2px 5px', borderRadius: '2px', letterSpacing: '0.03em', lineHeight: '14px' }}>
+              IMDb {movie.vote_average.toFixed(1)}
+            </span>
+          )}
+          {rt && (
+            <span style={{ background: '#FA320A', color: '#fff', fontSize: '9px', fontWeight: 800, padding: '2px 5px', borderRadius: '2px', letterSpacing: '0.03em', lineHeight: '14px' }}>
+              RT {rt}
+            </span>
+          )}
+        </div>
+
         <div
           className="font-display font-light leading-tight"
           style={{ fontFamily: 'var(--font-display)', fontSize: '16px', color: '#f5f0e8' }}
